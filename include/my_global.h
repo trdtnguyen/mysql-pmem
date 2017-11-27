@@ -25,6 +25,11 @@
   differences are mitigated.
 */
 
+#ifdef UNIV_NVM_LOG
+//tdnguyen
+#include <libpmem.h>
+#endif
+
 #include "my_config.h"
 
 #define __STDC_LIMIT_MACROS	/* Enable C99 limit macros */

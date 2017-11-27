@@ -109,6 +109,16 @@ Created 2/16/1996 Heikki Tuuri
 extern bool srv_lzo_disabled;
 #endif /* HAVE_LZO1X */
 
+#ifdef UNIV_NVM_LOG
+//tdnguyen
+#include <libpmem.h>
+//#include <libmytest.h>
+#include "pmem_log.h"
+
+//struct __pmem_map_file;
+//typedef struct pmem_map_file PMEM_MAP_FILE;
+#endif
+
 /** Log sequence number immediately after startup */
 lsn_t	srv_start_lsn;
 /** Log sequence number at shutdown */
@@ -159,7 +169,12 @@ enum srv_shutdown_t	srv_shutdown_state = SRV_SHUTDOWN_NONE;
 
 /** Files comprising the system tablespace */
 static pfs_os_file_t	files[1000];
-
+#ifdef UNIV_NVM_LOG
+//tdnguyetorage/innobase/srv/srv0start.cc
+/** array of pmem mapped addresses*/
+PMEM_FILE pmem_files[MAX_PMEM_FILES];
+static ulint pmem_cur_num = 0; 
+#endif
 /** io_handler_thread parameters for thread identification */
 static ulint		n[SRV_MAX_N_IO_THREADS + 6];
 /** io_handler_thread identifiers, 32 is the maximum number of purge threads  */
@@ -344,7 +359,20 @@ create_log_file(
 		ib::error() << "Cannot create " << name;
 		return(DB_ERROR);
 	}
+#ifdef UNIV_NVM_LOG
+//tdnguyen
+	/** map address from pmem to DRAM */
 
+	if(	(pmem_files[pmem_cur_num].addr = (char*)
+		pmem_map_file(name, srv_log_file_size, PMEM_FILE_CREATE, 0666,
+				&pmem_files[pmem_cur_num].mapped_len, 
+				&pmem_files[pmem_cur_num].is_pmem)) == NULL){
+		ib::error() << "PMEM_LOG: Cannot map pmem file";
+		return(DB_ERROR);
+	}
+	pmem_cur_num++;
+
+#endif
 	ib::info() << "Setting log file " << name << " size to "
 		<< (srv_log_file_size >> (20 - UNIV_PAGE_SIZE_SHIFT))
 		<< " MB";
@@ -1456,7 +1484,10 @@ innobase_start_or_create_for_mysql(void)
 	char*		logfile0	= NULL;
 	size_t		dirnamelen;
 	unsigned	i = 0;
-
+#ifdef UNIV_NVM_LOG
+//tdnguyen
+	ib::info() << "Hello NVM Log from VLDB lab ========\n";
+#endif
 	/* Reset the start state. */
 	srv_start_state = SRV_START_STATE_NONE;
 

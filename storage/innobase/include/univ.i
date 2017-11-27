@@ -33,6 +33,10 @@ Created 1/20/1994 Heikki Tuuri
 #ifndef univ_i
 #define univ_i
 
+/*tdnguyen added on 2017.11.24 */
+//#define UNIV_NVM_LOG /* implement REDO log with NVDIMM*/
+/*end tdnguyen added*/
+
 #ifdef UNIV_HOTBACKUP
 #include "hb_univ.i"
 #endif /* UNIV_HOTBACKUP */
