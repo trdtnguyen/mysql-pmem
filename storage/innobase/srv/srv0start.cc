@@ -170,10 +170,9 @@ enum srv_shutdown_t	srv_shutdown_state = SRV_SHUTDOWN_NONE;
 /** Files comprising the system tablespace */
 static pfs_os_file_t	files[1000];
 #ifdef UNIV_NVM_LOG
-//tdnguyetorage/innobase/srv/srv0start.cc
-/** array of pmem mapped addresses*/
-PMEM_FILE pmem_files[MAX_PMEM_FILES];
-static ulint pmem_cur_num = 0; 
+//tdnguyen
+/** global PMEM_FILE_COLL object*/
+PMEM_FILE_COLL* gb_pfc;
 #endif
 /** io_handler_thread parameters for thread identification */
 static ulint		n[SRV_MAX_N_IO_THREADS + 6];
@@ -362,16 +361,11 @@ create_log_file(
 #ifdef UNIV_NVM_LOG
 //tdnguyen
 	/** map address from pmem to DRAM */
-
-	if(	(pmem_files[pmem_cur_num].addr = (char*)
-		pmem_map_file(name, srv_log_file_size, PMEM_FILE_CREATE, 0666,
-				&pmem_files[pmem_cur_num].mapped_len, 
-				&pmem_files[pmem_cur_num].is_pmem)) == NULL){
-		ib::error() << "PMEM_LOG: Cannot map pmem file";
-		return(DB_ERROR);
-	}
-	pmem_cur_num++;
-
+//	ret = pfc_append_or_set(gb_pfc, name, (int)(file->m_file), gb_pfc->file_size);
+//	if (ret == PMEM_ERROR) {
+//		ib::error() << "Cannot map log file" << name << "in NVDIMM";
+//		return(DB_ERROR);	
+//	}
 #endif
 	ib::info() << "Setting log file " << name << " size to "
 		<< (srv_log_file_size >> (20 - UNIV_PAGE_SIZE_SHIFT))
@@ -570,7 +564,16 @@ open_log_file(
 	}
 
 	*size = os_file_get_size(*file);
-
+#ifdef UNIV_NVM_LOG
+	printf("open log file %s\n", name);
+	/** map address from pmem to DRAM */
+//	ret = pfc_append_or_set(gb_pfc, name, (int)(file->m_file), gb_pfc->file_size);
+//	if (ret == PMEM_ERROR) {
+//		ib::error() << "Cannot map log file" << name << "in NVDIMM";
+//		return(DB_ERROR);	
+//	}
+	
+#endif 
 	ret = os_file_close(*file);
 	ut_a(ret);
 	return(DB_SUCCESS);
@@ -1487,6 +1490,7 @@ innobase_start_or_create_for_mysql(void)
 #ifdef UNIV_NVM_LOG
 //tdnguyen
 	ib::info() << "Hello NVM Log from VLDB lab ========\n";
+	gb_pfc = pfc_new(srv_log_file_size);
 #endif
 	/* Reset the start state. */
 	srv_start_state = SRV_START_STATE_NONE;
@@ -2852,7 +2856,11 @@ innobase_shutdown_for_mysql(void)
 
 	srv_was_started = FALSE;
 	srv_start_has_been_called = FALSE;
-
+#ifdef UNIV_NVM_LOG
+	//tdnguyen
+	//free the global PMEM_FILE_COLL
+	pfc_free(gb_pfc);
+#endif
 	return(DB_SUCCESS);
 }
 #endif /* !UNIV_HOTBACKUP */

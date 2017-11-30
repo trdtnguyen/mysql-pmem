@@ -55,6 +55,13 @@ Created 10/25/1995 Heikki Tuuri
 #include "btr0sea.h"
 #include "log0log.h"
 
+#ifdef UNIV_NVM_LOG
+//tdnguyen
+#include "pmem_log.h"
+//declare it at storage/innobase/srv/srv0start.cc
+extern PMEM_FILE_COLL* gb_pfc;
+#endif
+
 /** Tries to close a file in the LRU list. The caller must hold the fil_sys
 mutex.
 @return true if success, false if should retry later; since i/o's
@@ -709,6 +716,12 @@ fil_node_open_file(
 	ut_a(node->n_pending == 0);
 	ut_a(!node->is_open);
 
+#ifdef UNIV_NVM_LOG
+//tdnguyen
+	if (space->purpose == FIL_TYPE_LOG){
+		printf("Debug here in fil_node_open_file()\n");	
+	}
+#endif //UNIV_NVM_LOG
 	read_only_mode = !fsp_is_system_temporary(space->id)
 		&& srv_read_only_mode;
 
@@ -883,6 +896,12 @@ add_size:
 		node->handle = os_file_create(
 			innodb_log_file_key, node->name, OS_FILE_OPEN,
 			OS_FILE_AIO, OS_LOG_FILE, read_only_mode, &success);
+#ifdef UNIV_NVM_LOG
+//tdnguyen
+//	if( (pfc_append_or_set(gb_pfc, node->name, (int)(node->handle.m_file), gb_pfc->file_size)) == PMEM_ERROR) {
+//		printf("PMEM_ERROR: At fil_node_open_file(), cannot map file %s from NVM\n", node->name);
+//	}
+#endif
 	} else if (node->is_raw_disk) {
 		node->handle = os_file_create(
 			innodb_data_file_key, node->name, OS_FILE_OPEN_RAW,
@@ -5776,6 +5795,16 @@ fil_io(
 		fsp_is_system_temporary(page_id.space())
 		? false : srv_read_only_mode,
 		node, message);
+
+#ifdef UNIV_NVM_LOG
+		if (req_type.is_log() && mode == OS_AIO_LOG){
+			//In NVM_LOG, we don't use aio, so we need to do the post-processing here
+			mutex_enter(&fil_system->mutex);
+			fil_node_complete_io(node, fil_system, req_type);
+			mutex_exit(&fil_system->mutex);
+			// log_io_complete() is called in the upper layer
+		}
+#endif /*UNIV_NVM_LOG */
 
 #endif /* UNIV_HOTBACKUP */
 

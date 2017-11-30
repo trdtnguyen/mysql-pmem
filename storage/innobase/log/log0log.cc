@@ -1567,6 +1567,22 @@ void
 log_io_complete_checkpoint(void)
 /*============================*/
 {
+#ifdef UNIV_NVM_LOG
+	/*In original InnoDB, this function only call by 
+	 * log_io_complete <- fil_aio_wait <- Log IO thread
+	 * In our NVM_LOG implementation, this function call from 
+	 * this function is call by AIO producer
+	//we already own the lock 
+	*/
+	MONITOR_DEC(MONITOR_PENDING_CHECKPOINT_WRITE);
+
+	ut_ad(log_sys->n_pending_checkpoint_writes > 0);
+
+	if (--log_sys->n_pending_checkpoint_writes == 0) {
+		log_complete_checkpoint();
+	}
+
+#else //original
 	MONITOR_DEC(MONITOR_PENDING_CHECKPOINT_WRITE);
 
 	log_mutex_enter();
@@ -1578,6 +1594,7 @@ log_io_complete_checkpoint(void)
 	}
 
 	log_mutex_exit();
+#endif /*UNIV_NVM_LOG*/
 }
 
 /******************************************************//**
@@ -1645,6 +1662,11 @@ log_group_checkpoint(
 	       OS_FILE_LOG_BLOCK_SIZE,
 	       buf, (byte*) group + 1);
 
+#ifdef UNIV_NVM_LOG
+			//In NVM_LOG, we don't use aio, so we need to do the post-processing here
+			ut_ad(log_mutex_own());
+			log_io_complete((static_cast<log_group_t*> ((void*)((byte*)group + 1))));
+#endif /*UNIV_NVM_LOG */
 	ut_ad(((ulint) group & 0x1UL) == 0);
 }
 
@@ -1737,7 +1759,6 @@ log_write_checkpoint_info(
 		/* Wait for the checkpoint write to complete */
 		rw_lock_s_lock(&log_sys->checkpoint_lock);
 		rw_lock_s_unlock(&log_sys->checkpoint_lock);
-
 		DEBUG_SYNC_C("checkpoint_completed");
 
 		DBUG_EXECUTE_IF(

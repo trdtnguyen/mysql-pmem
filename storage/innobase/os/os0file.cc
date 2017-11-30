@@ -32,6 +32,13 @@ The interface to the operating system file i/o primitives
 Created 10/21/1995 Heikki Tuuri
 *******************************************************/
 
+#ifdef UNIV_NVM_LOG
+//tdnguyen
+#include "pmem_log.h"
+////declare it at storage/innobase/srv/srv0start.cc
+extern PMEM_FILE_COLL* gb_pfc;
+#endif
+
 #ifndef UNIV_INNOCHECKSUM
 
 #include "ha_prototypes.h"
@@ -3273,7 +3280,14 @@ os_file_create_simple_func(
 
 	do {
 		file.m_file = ::open(name, create_flag, os_innodb_umask);
-
+#ifdef UNIV_NVM_LOG
+		//tdnguyen
+		if ( strstr(name, "log") != 0){
+			if( (pfc_append_or_set(gb_pfc, create_mode, name, (int)(file.m_file), gb_pfc->file_size)) == PMEM_ERROR) {
+				printf("PMEM_ERROR: At os_file_create_func(), cannot map file %s from NVM\n", name);
+			}
+		}
+#endif
 		if (file.m_file == -1) {
 			*success = false;
 
@@ -3592,7 +3606,15 @@ os_file_create_func(
 
 	do {
 		file.m_file = ::open(name, create_flag, os_innodb_umask);
+#ifdef UNIV_NVM_LOG
+		//tdnguyen
+		if (type == OS_LOG_FILE){
+			if( (pfc_append_or_set(gb_pfc, create_mode, name, (int)(file.m_file), gb_pfc->file_size)) == PMEM_ERROR) {
+				printf("PMEM_ERROR: At os_file_create_func(), cannot map file %s from NVM\n", name);
+			}
+		}
 
+#endif
 		if (file.m_file == -1) {
 			const char*	operation;
 
@@ -3721,9 +3743,15 @@ os_file_create_simple_no_error_handling_func(
 		file.m_file = OS_FILE_CLOSED;
 		return(file);
 	}
-
 	file.m_file = ::open(name, create_flag, os_innodb_umask);
-
+#ifdef UNIV_NVM_LOG
+		//tdnguyen
+		if ( strstr(name, "log") != 0){
+			if( (pfc_append_or_set(gb_pfc, create_mode, name, (int)(file.m_file), gb_pfc->file_size)) == PMEM_ERROR) {
+				printf("PMEM_ERROR: At os_file_create_func(), cannot map file %s from NVM\n", name);
+			}
+		}
+#endif
 	*success = (file.m_file != -1);
 
 #ifdef USE_FILE_LOCK
@@ -5402,7 +5430,32 @@ os_file_io(
 	ulint		original_n = n;
 	IORequest	type = in_type;
 	ssize_t		bytes_returned = 0;
+#ifdef UNIV_NVM_LOG
+	//tdnguyen
+	/*
+	 *If the log file IO is neither compressed nor encrypted, we can skip the rest of below code and
+	 just handle our code at the begining of this function
+	 * */
+	if (type.is_log()){
+#ifdef UNIV_NVM_LOG_DEBUG
+		printf("PMEM_DEBUG: handle pmem io in os_file_io, fd= %d, type is log_file, compressed=%d, encrypted=%d\n", 
+				file, type.is_compressed(), type.is_encrypted() );
+#endif
+		if (type.is_read()) {
+			bytes_returned = pfc_pmem_io(gb_pfc, PMEM_READ, file, buf, offset, n);
+		}
+		else if(type.is_write()) {
+			bytes_returned = pfc_pmem_io(gb_pfc, PMEM_WRITE, file, buf, offset, n);
+		}	
+		else{
+			printf("[PMEM_ERROR] unknown IO typ in os_file_io()\n ");
+		}
 
+		*err = DB_SUCCESS;
+		return bytes_returned;
+		
+	}	
+#endif
 	if (type.is_compressed()) {
 
 		/* We don't compress the first page of any file. */
@@ -7420,6 +7473,41 @@ os_aio_func(
 	ut_ad((n % OS_FILE_LOG_BLOCK_SIZE) == 0);
 	ut_ad((offset % OS_FILE_LOG_BLOCK_SIZE) == 0);
 	ut_ad(os_aio_validate_skip());
+#ifdef UNIV_NVM_LOG
+	//tdnguyen
+	/*
+	 *We do not do AIO in NVDIMM, just use our wrapper for using 
+	 memory manipulation operations
+	 When mode is OS_AIO_SYNC the call eventually come to os_file_io that we also handle PMEM io there
+	 */
+	if (type.is_log() && mode == OS_AIO_LOG){
+#ifdef UNIV_NVM_LOG_DEBUG
+		printf("PMEM_INFO: handle PMEM IO at os_aio_func() \n");
+#endif
+		ssize_t bytes_returned = 0;
+		if (type.is_read()) {
+			bytes_returned = pfc_pmem_io(gb_pfc, PMEM_READ, file.m_file, buf, offset, n);
+		}
+		else if(type.is_write()) {
+			bytes_returned = pfc_pmem_io(gb_pfc, PMEM_WRITE, file.m_file, buf, offset, n);
+		}	
+		else{
+			printf("[PMEM_ERROR] unknown IO typ in os_file_io()\n ");
+		}
+		//Simulate log io complete as in fil_aio_wait()
+//		mutex_enter(&fil_system->mutex);
+
+//		fil_node_complete_io(m1, fil_system, type);
+
+//		mutex_exit(&fil_system->mutex);
+//		srv_set_io_thread_op_info(segment, "complete io for log");
+//		log_io_complete(static_cast<log_group_t*>(message));
+//
+		//return now, the AIO post-precessing is done in upper level call
+		return ((bytes_returned > 0) ? DB_SUCCESS : DB_ERROR);
+	}
+	
+#endif
 
 #ifdef WIN_ASYNC_IO
 	ut_ad((n & 0xFFFFFFFFUL) == n);

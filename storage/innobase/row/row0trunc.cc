@@ -37,6 +37,12 @@ Created 2013-04-12 Sunny Bains
 #include "os0file.h"
 #include <vector>
 
+#ifdef UNIV_NVM_LOG
+#include "pmem_log.h"
+//declare it at storage/innobase/srv/srv0start.cc
+extern PMEM_FILE_COLL* gb_pfc;
+#endif
+
 bool	truncate_t::s_fix_up_active = false;
 truncate_t::tables_t		truncate_t::s_tables;
 truncate_t::truncated_tables_t	truncate_t::s_truncated_tables;
@@ -344,7 +350,12 @@ public:
 		if (!ret) {
 			return(DB_IO_ERROR);
 		}
-
+#ifdef UNIV_NVM_LOG
+		//tdnguyen
+//		if( (pfc_append_or_set(gb_pfc, m_log_file_name, (int)(handle.m_file), gb_pfc->file_size)) == PMEM_ERROR) {
+//			printf("PMEM_ERROR: At log(), cannot map file %s from NVM\n", m_log_file_name);
+//		} 
+#endif
 
 		ulint	sz = UNIV_PAGE_SIZE;
 		void*	buf = ut_zalloc_nokey(sz + UNIV_PAGE_SIZE);
@@ -480,7 +491,12 @@ public:
 			os_file_delete(innodb_log_file_key, m_log_file_name);
 			return;
 		}
-
+#ifdef UNIV_NVM_LOG
+		//tdnguyen
+//		if( (pfc_append_or_set(gb_pfc, m_log_file_name, (int)(handle.m_file), gb_pfc->file_size)) == PMEM_ERROR) {
+//			printf("PMEM_ERROR: At done(), cannot map file %s from NVM\n", m_log_file_name);
+//		} 
+#endif
 		byte	buffer[sizeof(TruncateLogger::s_magic)];
 		mach_write_to_4(buffer, TruncateLogger::s_magic);
 
