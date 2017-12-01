@@ -716,12 +716,6 @@ fil_node_open_file(
 	ut_a(node->n_pending == 0);
 	ut_a(!node->is_open);
 
-#ifdef UNIV_NVM_LOG
-//tdnguyen
-	if (space->purpose == FIL_TYPE_LOG){
-		printf("Debug here in fil_node_open_file()\n");	
-	}
-#endif //UNIV_NVM_LOG
 	read_only_mode = !fsp_is_system_temporary(space->id)
 		&& srv_read_only_mode;
 
@@ -896,12 +890,6 @@ add_size:
 		node->handle = os_file_create(
 			innodb_log_file_key, node->name, OS_FILE_OPEN,
 			OS_FILE_AIO, OS_LOG_FILE, read_only_mode, &success);
-#ifdef UNIV_NVM_LOG
-//tdnguyen
-//	if( (pfc_append_or_set(gb_pfc, node->name, (int)(node->handle.m_file), gb_pfc->file_size)) == PMEM_ERROR) {
-//		printf("PMEM_ERROR: At fil_node_open_file(), cannot map file %s from NVM\n", node->name);
-//	}
-#endif
 	} else if (node->is_raw_disk) {
 		node->handle = os_file_create(
 			innodb_data_file_key, node->name, OS_FILE_OPEN_RAW,
@@ -5923,7 +5911,21 @@ fil_flush(
 	mutex_enter(&fil_system->mutex);
 
 	fil_space_t*	space = fil_space_get_by_id(space_id);
-
+#ifdef UNIV_NVM_LOG
+	//We skip thif flush in NVM_LOG
+	if (space == NULL
+	    || space->purpose == FIL_TYPE_LOG
+	    || space->purpose == FIL_TYPE_TEMPORARY
+	    || space->stop_new_ops
+	    || space->is_being_truncated) {
+		mutex_exit(&fil_system->mutex);
+#ifdef UNIV_NVM_LOG_DEBUG
+		if(space->purpose == FIL_TYPE_LOG)
+			printf("PMEM_DEBUG: skip fil_flush space %lu\n", space_id);
+#endif
+		return;
+	}
+#else //original
 	if (space == NULL
 	    || space->purpose == FIL_TYPE_TEMPORARY
 	    || space->stop_new_ops
@@ -5932,7 +5934,7 @@ fil_flush(
 
 		return;
 	}
-
+#endif /*UNIV_LOG_NVM */
 	if (fil_buffering_disabled(space)) {
 
 		/* No need to flush. User has explicitly disabled
@@ -6108,10 +6110,8 @@ fil_flush_file_spaces(
 	/* Flush the spaces.  It will not hurt to call fil_flush() on
 	a non-existing space id. */
 	for (ulint i = 0; i < n_space_ids; i++) {
-
 		fil_flush(space_ids[i]);
 	}
-
 	ut_free(space_ids);
 }
 

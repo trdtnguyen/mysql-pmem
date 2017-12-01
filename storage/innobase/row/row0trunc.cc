@@ -350,12 +350,6 @@ public:
 		if (!ret) {
 			return(DB_IO_ERROR);
 		}
-#ifdef UNIV_NVM_LOG
-		//tdnguyen
-//		if( (pfc_append_or_set(gb_pfc, m_log_file_name, (int)(handle.m_file), gb_pfc->file_size)) == PMEM_ERROR) {
-//			printf("PMEM_ERROR: At log(), cannot map file %s from NVM\n", m_log_file_name);
-//		} 
-#endif
 
 		ulint	sz = UNIV_PAGE_SIZE;
 		void*	buf = ut_zalloc_nokey(sz + UNIV_PAGE_SIZE);

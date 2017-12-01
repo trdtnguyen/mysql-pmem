@@ -358,15 +358,6 @@ create_log_file(
 		ib::error() << "Cannot create " << name;
 		return(DB_ERROR);
 	}
-#ifdef UNIV_NVM_LOG
-//tdnguyen
-	/** map address from pmem to DRAM */
-//	ret = pfc_append_or_set(gb_pfc, name, (int)(file->m_file), gb_pfc->file_size);
-//	if (ret == PMEM_ERROR) {
-//		ib::error() << "Cannot map log file" << name << "in NVDIMM";
-//		return(DB_ERROR);	
-//	}
-#endif
 	ib::info() << "Setting log file " << name << " size to "
 		<< (srv_log_file_size >> (20 - UNIV_PAGE_SIZE_SHIFT))
 		<< " MB";
@@ -511,7 +502,11 @@ create_log_files_rename(
 {
 	/* If innodb_flush_method=O_DSYNC,
 	we need to explicitly flush the log buffers. */
+#ifdef UNIV_NVM_LOG
+	//We skip fil_flush, do nothing
+#else //original
 	fil_flush(SRV_LOG_SPACE_FIRST_ID);
+#endif /* UNIV_NVM_LOG */
 	/* Close the log files, so that we can rename
 	the first one. */
 	fil_close_log_files(false);
@@ -564,15 +559,9 @@ open_log_file(
 	}
 
 	*size = os_file_get_size(*file);
-#ifdef UNIV_NVM_LOG
+#ifdef UNIV_NVM_LOG_DEBUG
+	//tdnguyen
 	printf("open log file %s\n", name);
-	/** map address from pmem to DRAM */
-//	ret = pfc_append_or_set(gb_pfc, name, (int)(file->m_file), gb_pfc->file_size);
-//	if (ret == PMEM_ERROR) {
-//		ib::error() << "Cannot map log file" << name << "in NVDIMM";
-//		return(DB_ERROR);	
-//	}
-	
 #endif 
 	ret = os_file_close(*file);
 	ut_a(ret);
@@ -1441,7 +1430,11 @@ srv_prepare_to_delete_redo_log_files(
 
 		/* If innodb_flush_method=O_DSYNC,
 		we need to explicitly flush the log buffers. */
+#ifdef UNIV_NVM_LOG
+		//We skip fil_flush, do nothing
+#else //original
 		fil_flush(SRV_LOG_SPACE_FIRST_ID);
+#endif /* UNIV_NVM_LOG */
 
 		ut_ad(flushed_lsn == log_get_lsn());
 

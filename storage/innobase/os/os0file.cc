@@ -7494,15 +7494,6 @@ os_aio_func(
 		else{
 			printf("[PMEM_ERROR] unknown IO typ in os_file_io()\n ");
 		}
-		//Simulate log io complete as in fil_aio_wait()
-//		mutex_enter(&fil_system->mutex);
-
-//		fil_node_complete_io(m1, fil_system, type);
-
-//		mutex_exit(&fil_system->mutex);
-//		srv_set_io_thread_op_info(segment, "complete io for log");
-//		log_io_complete(static_cast<log_group_t*>(message));
-//
 		//return now, the AIO post-precessing is done in upper level call
 		return ((bytes_returned > 0) ? DB_SUCCESS : DB_ERROR);
 	}
