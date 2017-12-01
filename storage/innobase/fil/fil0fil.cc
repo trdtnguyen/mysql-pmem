@@ -5911,21 +5911,21 @@ fil_flush(
 	mutex_enter(&fil_system->mutex);
 
 	fil_space_t*	space = fil_space_get_by_id(space_id);
-#ifdef UNIV_NVM_LOG
+//#ifdef UNIV_NVM_LOG
 	//We skip thif flush in NVM_LOG
-	if (space == NULL
-	    || space->purpose == FIL_TYPE_LOG
-	    || space->purpose == FIL_TYPE_TEMPORARY
-	    || space->stop_new_ops
-	    || space->is_being_truncated) {
-		mutex_exit(&fil_system->mutex);
-#ifdef UNIV_NVM_LOG_DEBUG
-		if(space->purpose == FIL_TYPE_LOG)
-			printf("PMEM_DEBUG: skip fil_flush space %lu\n", space_id);
-#endif
-		return;
-	}
-#else //original
+//	if (space == NULL
+//	    || space->purpose == FIL_TYPE_LOG
+//	    || space->purpose == FIL_TYPE_TEMPORARY
+//	    || space->stop_new_ops
+//	    || space->is_being_truncated) {
+//		mutex_exit(&fil_system->mutex);
+//#ifdef UNIV_NVM_LOG_DEBUG
+//		if(space->purpose == FIL_TYPE_LOG)
+//			printf("PMEM_DEBUG: skip fil_flush space %lu\n", space_id);
+//#endif
+//		return;
+//	}
+//#else //original
 	if (space == NULL
 	    || space->purpose == FIL_TYPE_TEMPORARY
 	    || space->stop_new_ops
@@ -5934,7 +5934,7 @@ fil_flush(
 
 		return;
 	}
-#endif /*UNIV_LOG_NVM */
+//#endif /*UNIV_LOG_NVM */
 	if (fil_buffering_disabled(space)) {
 
 		/* No need to flush. User has explicitly disabled
@@ -6019,9 +6019,13 @@ retry:
 		node->n_pending_flushes++;
 
 		mutex_exit(&fil_system->mutex);
-
+#ifdef UNIV_NVM_LOG
+		if ( space->purpose == FIL_TYPE_LOG ){
+			//we skip_flush, do nothing
+		}
+#else //original
 		os_file_flush(file);
-
+#endif /* UNIV_NVM_LOG */
 		mutex_enter(&fil_system->mutex);
 
 		os_event_set(node->sync_event);

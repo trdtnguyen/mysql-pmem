@@ -502,11 +502,11 @@ create_log_files_rename(
 {
 	/* If innodb_flush_method=O_DSYNC,
 	we need to explicitly flush the log buffers. */
-#ifdef UNIV_NVM_LOG
+//#ifdef UNIV_NVM_LOG
 	//We skip fil_flush, do nothing
-#else //original
+//#else //original
 	fil_flush(SRV_LOG_SPACE_FIRST_ID);
-#endif /* UNIV_NVM_LOG */
+//#endif /* UNIV_NVM_LOG */
 	/* Close the log files, so that we can rename
 	the first one. */
 	fil_close_log_files(false);
@@ -1430,11 +1430,11 @@ srv_prepare_to_delete_redo_log_files(
 
 		/* If innodb_flush_method=O_DSYNC,
 		we need to explicitly flush the log buffers. */
-#ifdef UNIV_NVM_LOG
+//#ifdef UNIV_NVM_LOG
 		//We skip fil_flush, do nothing
-#else //original
+//#else //original
 		fil_flush(SRV_LOG_SPACE_FIRST_ID);
-#endif /* UNIV_NVM_LOG */
+//#endif /* UNIV_NVM_LOG */
 
 		ut_ad(flushed_lsn == log_get_lsn());
 
