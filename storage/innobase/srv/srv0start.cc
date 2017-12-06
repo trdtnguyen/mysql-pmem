@@ -179,6 +179,7 @@ PMEM_FILE_COLL* gb_pfc;
 #endif
 #ifdef UNIV_PMEMOBJ_LOG
 /*globel PMEMobjpool*/
+const char* PMEM_FILE_PATH = "/mnt/pmem01/mapfile";
 PMEM_WRAPPER* gb_pmw;
 #endif //UNIV_PMEMOBJ_LOG
 /** io_handler_thread parameters for thread identification */
@@ -1487,9 +1488,8 @@ innobase_start_or_create_for_mysql(void)
 #ifdef UNIV_PMEMOBJ_LOG
 	ib::info() << "======= Hello PMEMOBJ Log from VLDB lab ========\n";
 //	gb_pop = pmem_create_PMEMobjpool(srv_log_group_home_dir);
-	gb_pmw = pm_create_PMEMwrapper(PMEM_FILE);
+	gb_pmw = pm_create_PMEMwrapper(PMEM_FILE_PATH);
 	assert(gb_pmw);
-	gb_pmw->logfile_size = srv_log_file_size;	
 #endif
 	/* Reset the start state. */
 	srv_start_state = SRV_START_STATE_NONE;

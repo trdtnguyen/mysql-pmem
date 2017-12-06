@@ -26,14 +26,10 @@
 
 #include "os0file.h"
 #include <libpmem.h>
+#include "my_pmem_common.h"
 //compile with cc ... -lpmem
 
-#define PMEM_MAX_FILES 1000
-#define PMEM_MAX_FILE_NAME_LENGTH 10000
 
-//error handler
-#define PMEM_SUCCESS 0
-#define PMEM_ERROR -1
 
 
 struct __pmem_file;
@@ -41,10 +37,6 @@ typedef struct __pmem_file PMEM_FILE;
 struct __pmem_file_coll;
 typedef struct __pmem_file_coll PMEM_FILE_COLL;
 
-enum {
-	PMEM_READ = 1,
-	PMEM_WRITE = 2
-};
 
 struct __pmem_file {
 	char* addr; //mapped address

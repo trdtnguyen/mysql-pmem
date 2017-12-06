@@ -38,6 +38,7 @@ Created 10/21/1995 Heikki Tuuri
 ////declare it at storage/innobase/srv/srv0start.cc
 extern PMEM_FILE_COLL* gb_pfc;
 #endif
+
 #ifdef UNIV_PMEMOBJ_LOG
 #include "my_pmemobj.h"
 extern PMEM_WRAPPER* gb_pmw;
@@ -3291,12 +3292,6 @@ os_file_create_simple_func(
 				printf("PMEM_ERROR: At os_file_create_func(), cannot map file %s from NVM\n", name);
 			}
 		}
-#elif defined(UNIV_PMEMOBJ_LOG)
-		if ( strstr(name, "logfile") != 0){
-			if ( pm_log_file_alloc(gb_pmw->pop, name, (int)(file.m_file), gb_pmw->logfile_size) != PMEM_SUCCESS){
-				printf("PMEMOBJ_ERROR: At os_file_create_func(), cannot map file %s from NVM\n", name);
-			}
-		}
 #endif
 
 		if (file.m_file == -1) {
@@ -3624,13 +3619,6 @@ os_file_create_func(
 				printf("PMEM_ERROR: At os_file_create_func(), cannot map file %s from NVM\n", name);
 			}
 		}
-
-#elif defined(UNIV_PMEMOBJ_LOG)
-		if (type == OS_LOG_FILE){
-			if ( pm_log_file_alloc(gb_pmw->pop, name, (int)(file.m_file), gb_pmw->logfile_size) != PMEM_SUCCESS){
-				printf("PMEMOBJ_ERROR: At os_file_create_func(), cannot map file %s from NVM\n", name);
-			}
-		}
 #endif
 		if (file.m_file == -1) {
 			const char*	operation;
@@ -3766,12 +3754,6 @@ os_file_create_simple_no_error_handling_func(
 		if ( strstr(name, "logfile") != 0){
 			if( (pfc_append_or_set(gb_pfc, create_mode, name, (int)(file.m_file), gb_pfc->file_size)) == PMEM_ERROR) {
 				printf("PMEM_ERROR: At os_file_create_func(), cannot map file %s from NVM\n", name);
-			}
-		}
-#elif defined(UNIV_PMEMOBJ_LOG)
-		if ( strstr(name, "logfile") != 0){
-			if ( pm_log_file_alloc(gb_pmw->pop, name, (int)(file.m_file), gb_pmw->logfile_size) != PMEM_SUCCESS){
-				printf("PMEMOBJ_ERROR: At os_file_create_func(), cannot map file %s from NVM\n", name);
 			}
 		}
 #endif
@@ -5472,26 +5454,6 @@ os_file_io(
 		}	
 		else{
 			printf("[PMEM_ERROR] unknown IO typ in os_file_io()\n ");
-		}
-
-		*err = DB_SUCCESS;
-		return bytes_returned;
-		
-	}
-#elif defined(UNIV_PMEMOBJ_LOG)
-	if (type.is_log()){
-#ifdef UNIV_PMEMOBJ_LOG_DEBUG
-		printf("PMEMOBJ_DEBUG: handle pmem io in os_file_io, fd= %d, type is log_file, compressed=%d, encrypted=%d\n", 
-				file, type.is_compressed(), type.is_encrypted() );
-#endif
-		if (type.is_read()) {
-			bytes_returned = pm_log_io(gb_pmw->pop, PMEM_READ, file, buf, offset, n);
-		}
-		else if(type.is_write()) {
-			bytes_returned = pm_log_io(gb_pmw->pop, PMEM_WRITE, file, buf, offset, n);
-		}	
-		else{
-			printf("[PMEMOBJ_ERROR] unknown IO typ in os_file_io()\n ");
 		}
 
 		*err = DB_SUCCESS;
@@ -7540,25 +7502,6 @@ os_aio_func(
 		//return now, the AIO post-precessing is done in upper level call
 		return ((bytes_returned > 0) ? DB_SUCCESS : DB_ERROR);
 	}
-#elif defined(UNIV_PMEMOBJ_LOG)
-	if (type.is_log() && mode == OS_AIO_LOG){
-#ifdef UNIV_PMEMOBJ_LOG_DEBUG
-		printf("PMEMOBJ_INFO: handle PMEM IO at os_aio_func() \n");
-#endif
-		ssize_t bytes_returned = 0;
-		if (type.is_read()) {
-			bytes_returned = pm_log_io(gb_pmw->pop, PMEM_READ, file.m_file, buf, offset, n);
-		}
-		else if(type.is_write()) {
-			bytes_returned = pm_log_io(gb_pmw->pop, PMEM_WRITE, file.m_file, buf, offset, n);
-		}
-		else{
-			printf("[PMEM_ERROR] unknown IO typ in os_file_io()\n ");
-		}
-		//return now, the AIO post-precessing is done in upper level call
-		return ((bytes_returned > 0) ? DB_SUCCESS : DB_ERROR);
-	}
-		
 #endif
 
 #ifdef WIN_ASYNC_IO

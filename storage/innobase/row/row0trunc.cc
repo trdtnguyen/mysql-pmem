@@ -489,12 +489,6 @@ public:
 			os_file_delete(innodb_log_file_key, m_log_file_name);
 			return;
 		}
-#ifdef UNIV_NVM_LOG
-		//tdnguyen
-//		if( (pfc_append_or_set(gb_pfc, m_log_file_name, (int)(handle.m_file), gb_pfc->file_size)) == PMEM_ERROR) {
-//			printf("PMEM_ERROR: At done(), cannot map file %s from NVM\n", m_log_file_name);
-//		} 
-#endif
 		byte	buffer[sizeof(TruncateLogger::s_magic)];
 		mach_write_to_4(buffer, TruncateLogger::s_magic);
 

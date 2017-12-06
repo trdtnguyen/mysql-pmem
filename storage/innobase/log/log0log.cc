@@ -1567,7 +1567,7 @@ void
 log_io_complete_checkpoint(void)
 /*============================*/
 {
-#if defined( UNIV_NVM_LOG) || defined (UNIV_PMEMOBJ_LOG)
+#if defined( UNIV_NVM_LOG)
 	/*In original InnoDB, this function only call by 
 	 * log_io_complete <- fil_aio_wait <- Log IO thread
 	 * In our NVM_LOG implementation, this function call from 
@@ -1662,7 +1662,7 @@ log_group_checkpoint(
 	       OS_FILE_LOG_BLOCK_SIZE,
 	       buf, (byte*) group + 1);
 
-#if defined(UNIV_NVM_LOG) || defined(UNIV_PMEMOBJ_LOG)
+#if defined(UNIV_NVM_LOG)
 			//In NVM_LOG, we don't use aio, so we need to do the post-processing here
 			ut_ad(log_mutex_own());
 			log_io_complete((static_cast<log_group_t*> ((void*)((byte*)group + 1))));
