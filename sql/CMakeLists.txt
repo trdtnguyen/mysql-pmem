@@ -388,10 +388,12 @@ DTRACE_INSTRUMENT(sql)
 #  ${LIBWRAP} ${LIBCRYPT} ${LIBDL}
 #  ${SSL_LIBRARIES})
 
+#tdnguyen
 TARGET_LINK_LIBRARIES(sql ${MYSQLD_STATIC_PLUGIN_LIBS} 
   mysys mysys_ssl dbug strings vio regex binlogevents_static
   ${LIBWRAP} ${LIBCRYPT} ${LIBDL}
-  ${SSL_LIBRARIES} ${NVM_LIBS})
+  #${SSL_LIBRARIES} ${NVM_LIB_PMEM})
+  ${SSL_LIBRARIES} ${NVM_LIB_PMEMOBJ} ${NVM_LIB_PMEM} )
 
 #
 # On Windows platform we compile in the clinet-side Windows Native Authentication

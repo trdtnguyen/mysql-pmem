@@ -42,6 +42,10 @@ Created 2013-04-12 Sunny Bains
 //declare it at storage/innobase/srv/srv0start.cc
 extern PMEM_FILE_COLL* gb_pfc;
 #endif
+#ifdef UNIV_PMEMOBJ_LOG
+#include "my_pmemobj.h"
+extern PMEM_WRAPPER* gb_pmw;
+#endif
 
 bool	truncate_t::s_fix_up_active = false;
 truncate_t::tables_t		truncate_t::s_tables;

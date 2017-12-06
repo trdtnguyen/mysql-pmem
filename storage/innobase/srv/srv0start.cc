@@ -114,10 +114,13 @@ extern bool srv_lzo_disabled;
 #include <libpmem.h>
 //#include <libmytest.h>
 #include "pmem_log.h"
-
-//struct __pmem_map_file;
-//typedef struct pmem_map_file PMEM_MAP_FILE;
 #endif
+
+#ifdef UNIV_PMEMOBJ_LOG
+#include <libpmem.h>
+#include <libpmemobj.h>
+#include "my_pmemobj.h"
+#endif //UNIV_PMEMOBJ_LOG
 
 /** Log sequence number immediately after startup */
 lsn_t	srv_start_lsn;
@@ -174,6 +177,10 @@ static pfs_os_file_t	files[1000];
 /** global PMEM_FILE_COLL object*/
 PMEM_FILE_COLL* gb_pfc;
 #endif
+#ifdef UNIV_PMEMOBJ_LOG
+/*globel PMEMobjpool*/
+PMEM_WRAPPER* gb_pmw;
+#endif //UNIV_PMEMOBJ_LOG
 /** io_handler_thread parameters for thread identification */
 static ulint		n[SRV_MAX_N_IO_THREADS + 6];
 /** io_handler_thread identifiers, 32 is the maximum number of purge threads  */
@@ -502,11 +509,7 @@ create_log_files_rename(
 {
 	/* If innodb_flush_method=O_DSYNC,
 	we need to explicitly flush the log buffers. */
-//#ifdef UNIV_NVM_LOG
-	//We skip fil_flush, do nothing
-//#else //original
 	fil_flush(SRV_LOG_SPACE_FIRST_ID);
-//#endif /* UNIV_NVM_LOG */
 	/* Close the log files, so that we can rename
 	the first one. */
 	fil_close_log_files(false);
@@ -1430,11 +1433,7 @@ srv_prepare_to_delete_redo_log_files(
 
 		/* If innodb_flush_method=O_DSYNC,
 		we need to explicitly flush the log buffers. */
-//#ifdef UNIV_NVM_LOG
-		//We skip fil_flush, do nothing
-//#else //original
 		fil_flush(SRV_LOG_SPACE_FIRST_ID);
-//#endif /* UNIV_NVM_LOG */
 
 		ut_ad(flushed_lsn == log_get_lsn());
 
@@ -1484,6 +1483,13 @@ innobase_start_or_create_for_mysql(void)
 //tdnguyen
 	ib::info() << "Hello NVM Log from VLDB lab ========\n";
 	gb_pfc = pfc_new(srv_log_file_size);
+#endif
+#ifdef UNIV_PMEMOBJ_LOG
+	ib::info() << "======= Hello PMEMOBJ Log from VLDB lab ========\n";
+//	gb_pop = pmem_create_PMEMobjpool(srv_log_group_home_dir);
+	gb_pmw = pm_create_PMEMwrapper(PMEM_FILE);
+	assert(gb_pmw);
+	gb_pmw->logfile_size = srv_log_file_size;	
 #endif
 	/* Reset the start state. */
 	srv_start_state = SRV_START_STATE_NONE;
@@ -2853,6 +2859,10 @@ innobase_shutdown_for_mysql(void)
 	//tdnguyen
 	//free the global PMEM_FILE_COLL
 	pfc_free(gb_pfc);
+#endif
+
+#ifdef UNIV_PMEMOBJ_LOG
+	pm_free_PMEMwrapper(gb_pmw);
 #endif
 	return(DB_SUCCESS);
 }

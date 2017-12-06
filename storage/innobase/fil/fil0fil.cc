@@ -61,6 +61,10 @@ Created 10/25/1995 Heikki Tuuri
 //declare it at storage/innobase/srv/srv0start.cc
 extern PMEM_FILE_COLL* gb_pfc;
 #endif
+#ifdef UNIV_PMEMOBJ_LOG
+#include "my_pmemobj.h"
+extern PMEM_WRAPPER* gb_pmw;
+#endif
 
 /** Tries to close a file in the LRU list. The caller must hold the fil_sys
 mutex.
@@ -5784,7 +5788,7 @@ fil_io(
 		? false : srv_read_only_mode,
 		node, message);
 
-#ifdef UNIV_NVM_LOG
+#if defined (UNIV_NVM_LOG) || defined(UNIV_PMEMOBJ_LOG)
 		if (req_type.is_log() && mode == OS_AIO_LOG){
 			//In NVM_LOG, we don't use aio, so we need to do the post-processing here
 			mutex_enter(&fil_system->mutex);
@@ -5792,7 +5796,7 @@ fil_io(
 			mutex_exit(&fil_system->mutex);
 			// log_io_complete() is called in the upper layer
 		}
-#endif /*UNIV_NVM_LOG */
+#endif /*UNIV_NVM_LOG || NVM_PMEMOBJ_LOG*/
 
 #endif /* UNIV_HOTBACKUP */
 
@@ -6019,7 +6023,7 @@ retry:
 		node->n_pending_flushes++;
 
 		mutex_exit(&fil_system->mutex);
-#ifdef UNIV_NVM_LOG
+#if defined (UNIV_NVM_LOG) || defined(UNIV_PMEMOBJ_LOG)
 		if ( space->purpose == FIL_TYPE_LOG ){
 			//we skip_flush, do nothing
 		}

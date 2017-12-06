@@ -28,7 +28,8 @@ MYSQL_ADD_EXECUTABLE(mysql_embedded ../../client/completion_hash.cc
                ../../client/mysql.cc ../../client/readline.cc)
 #tdnguyen added
 #TARGET_LINK_LIBRARIES(mysql_embedded mysqlserver)
-TARGET_LINK_LIBRARIES(mysql_embedded mysqlserver ${NVM_LIBS})
+TARGET_LINK_LIBRARIES(mysql_embedded mysqlserver ${NVM_LIB_PMEMOBJ} ${NVM_LIB_PMEM} )
+#TARGET_LINK_LIBRARIES(mysql_embedded mysqlserver ${NVM_LIB_PMEM})
 #end tdnguyen added
 
 IF(UNIX)
@@ -50,7 +51,8 @@ ENDIF()
 MYSQL_ADD_EXECUTABLE(mysqltest_embedded ../../client/mysqltest.cc)
 #tdnguyen added
 #TARGET_LINK_LIBRARIES(mysqltest_embedded mysqlserver)
-TARGET_LINK_LIBRARIES(mysqltest_embedded mysqlserver ${NVM_LIBS})
+TARGET_LINK_LIBRARIES(mysqltest_embedded mysqlserver ${NVM_LIB_PMEMOBJ} ${NVM_LIB_PMEM} )
+#TARGET_LINK_LIBRARIES(mysqltest_embedded mysqlserver ${NVM_LIB_PMEM})
 
 
 IF(CMAKE_GENERATOR MATCHES "Xcode")
@@ -78,7 +80,8 @@ ENDIF()
 IF(NOT INSTALL_LAYOUT MATCHES "SVR4")
 	#tdnguyen added
 	#TARGET_LINK_LIBRARIES(mysql_client_test_embedded mysqlserver)
-	TARGET_LINK_LIBRARIES(mysql_client_test_embedded mysqlserver ${NVM_LIBS})
+		TARGET_LINK_LIBRARIES(mysql_client_test_embedded mysqlserver ${NVM_LIB_PMEMOBJ} ${NVM_LIB_PMEM} )
+	#TARGET_LINK_LIBRARIES(mysql_client_test_embedded mysqlserver ${NVM_LIB_PMEM})
 ENDIF()
 
 IF(UNIX)

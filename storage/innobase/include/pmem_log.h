@@ -62,7 +62,6 @@ struct __pmem_file_coll{
 };
 
 
-#endif //__PMEM_H__
 
 /* FUNCTIONS*/
 static inline PMEM_FILE_COLL* pfc_new(uint64_t file_size);
@@ -343,3 +342,5 @@ static inline int pf_persist(PMEM_FILE_COLL* pfc, const int fd){
 		return PMEM_ERROR;
 	}
 }
+
+#endif //__PMEM_H__

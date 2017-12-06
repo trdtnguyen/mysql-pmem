@@ -15,7 +15,8 @@
 
 #tdnguyen added
 #SET (NVM_LIBS mytest)
-SET (NVM_LIBS pmem)
+SET (NVM_LIB_PMEM pmem)
+SET (NVM_LIB_PMEMOBJ pmemobj)
 #end tdnguyen added
 
 IF(WIN32)

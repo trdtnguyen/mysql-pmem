@@ -25,8 +25,12 @@
   differences are mitigated.
 */
 
-#ifdef UNIV_NVM_LOG
+#if defined(UNIV_NVM_LOG) || defined(UNIV_PMEMOBJ_LOG)
 //tdnguyen
+#include <libpmem.h>
+#endif
+#ifdef UNIV_PMEMOBJ_LOG
+#include <libpmemobj.h>
 #include <libpmem.h>
 #endif
 
