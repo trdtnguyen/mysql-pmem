@@ -57,6 +57,12 @@ Created 12/9/1995 Heikki Tuuri
 #include "sync0sync.h"
 #endif /* !UNIV_HOTBACKUP */
 
+#if defined(UNIV_PMEMOBJ_LOG)
+#include "my_pmemobj.h"
+
+extern PMEM_WRAPPER* gb_pmw;
+#endif /*UNIV_PMEMOBJ_LOG*/
+
 /*
 General philosophy of InnoDB redo-logs:
 
@@ -806,9 +812,23 @@ log_init(void)
 	ut_a(LOG_BUFFER_SIZE >= 4 * UNIV_PAGE_SIZE);
 
 	log_sys->buf_size = LOG_BUFFER_SIZE;
-
+#if defined(UNIV_PMEMOBJ_LOG)
+	//allocate the log buffer in persistent memory
+	if (!gb_pmw->plogbuf){
+		if ( pm_wrapper_logbuf_alloc(gb_pmw, 2 * LOG_BUFFER_SIZE + OS_FILE_LOG_BLOCK_SIZE)
+				== PMEM_ERROR) {
+			printf("PMEMOBJ_ERROR: error when allocate log buffer in log_init()\n");
+		}
+	}
+	else {
+		printf("PMEMOBJ_INFO: the server restart from a crash but the log buffer is persist\n");
+		//do some work here 
+	}
+	log_sys->buf_ptr = static_cast<byte*> (pm_wrapper_logbuf_get_logdata(gb_pmw));
+#else //original
 	log_sys->buf_ptr = static_cast<byte*>(
 		ut_zalloc_nokey(log_sys->buf_size * 2 + OS_FILE_LOG_BLOCK_SIZE));
+#endif /*UNIV_PMEMOBJ_LOG*/
 	log_sys->buf = static_cast<byte*>(
 		ut_align(log_sys->buf_ptr, OS_FILE_LOG_BLOCK_SIZE));
 
@@ -2503,8 +2523,12 @@ log_shutdown(void)
 /*==============*/
 {
 	log_group_close_all();
-
+#if defined(UNIV_PMEMOBJ_LOG)
+	//The pmem free() is done later
+	//do nothing for log_sys->buf_ptr
+#else //original
 	ut_free(log_sys->buf_ptr);
+#endif
 	log_sys->buf_ptr = NULL;
 	log_sys->buf = NULL;
 	ut_free(log_sys->checkpoint_buf_ptr);

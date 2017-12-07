@@ -1488,7 +1488,7 @@ innobase_start_or_create_for_mysql(void)
 #ifdef UNIV_PMEMOBJ_LOG
 	ib::info() << "======= Hello PMEMOBJ Log from VLDB lab ========\n";
 //	gb_pop = pmem_create_PMEMobjpool(srv_log_group_home_dir);
-	gb_pmw = pm_create_PMEMwrapper(PMEM_FILE_PATH);
+	gb_pmw = pm_wrapper_create(PMEM_FILE_PATH);
 	assert(gb_pmw);
 #endif
 	/* Reset the start state. */
@@ -2862,7 +2862,7 @@ innobase_shutdown_for_mysql(void)
 #endif
 
 #ifdef UNIV_PMEMOBJ_LOG
-	pm_free_PMEMwrapper(gb_pmw);
+	pm_wrapper_free(gb_pmw);
 #endif
 	return(DB_SUCCESS);
 }
