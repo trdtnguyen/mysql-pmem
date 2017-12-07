@@ -435,7 +435,12 @@ part_loop:
 			- LOG_BLOCK_TRL_SIZE;
 	}
 
+#if defined (UNIV_PMEMOBJ_LOG)
+	//copy the trasaction's log records to persistent memory
+	pmemobj_memcpy_persist(gb_pmw->pop, log->buf + log->buf_free, str, len);
+#else //original
 	ut_memcpy(log->buf + log->buf_free, str, len);
+#endif /* UNIV_PMEMOBJ_LOG */
 
 	str_len -= len;
 	str = str + len;
@@ -468,7 +473,11 @@ part_loop:
 	if (str_len > 0) {
 		goto part_loop;
 	}
-
+#if defined(UNIV_PMEMOBJ_LOG)
+	// update the lsn and buf_free
+	gb_pmw->plogbuf->lsn = log->lsn;
+	gb_pmw->plogbuf->buf_free = log->buf_free;	
+#endif /*UNIV_PMEMOBJ_LOG */
 	srv_stats.log_write_requests.inc();
 }
 
@@ -821,7 +830,8 @@ log_init(void)
 		}
 	}
 	else {
-		printf("PMEMOBJ_INFO: the server restart from a crash but the log buffer is persist\n");
+		printf("!!!!!!! [PMEMOBJ_INFO]: the server restart from a crash but the log buffer is persist, in pmem: size = %zd lsn = %"PRIu64" \n", 
+				gb_pmw->plogbuf->size, gb_pmw->plogbuf->lsn);
 		//do some work here 
 	}
 	log_sys->buf_ptr = static_cast<byte*> (pm_wrapper_logbuf_get_logdata(gb_pmw));
@@ -870,7 +880,13 @@ log_init(void)
 
 	log_sys->buf_free = LOG_BLOCK_HDR_SIZE;
 	log_sys->lsn = LOG_START_LSN + LOG_BLOCK_HDR_SIZE;
-
+#if defined(UNIV_PMEMOBJ_LOG)
+	//Update the lsn, buf_free in necessary
+	if(gb_pmw->plogbuf->lsn < log_sys->lsn)
+		gb_pmw->plogbuf->lsn = log_sys->lsn;
+	if(gb_pmw->plogbuf->buf_free < log_sys->buf_free)
+		gb_pmw->plogbuf->buf_free = log_sys->buf_free;
+#endif /* UNIV_PMEMOBJ_LOG */
 	MONITOR_SET(MONITOR_LSN_CHECKPOINT_AGE,
 		    log_sys->lsn - log_sys->last_checkpoint_lsn);
 }

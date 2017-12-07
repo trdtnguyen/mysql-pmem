@@ -49,6 +49,8 @@ struct __pmem_log_buf {
 	size_t size;
 	PMEM_OBJ_TYPES type;	
 	PMEMoid  data; //log data
+    uint64_t lsn; 	
+	uint64_t buf_free; /* first free offset within the log buffer */
 };
 
 /*The global wrapper*/
@@ -128,7 +130,7 @@ static inline PMEM_WRAPPER* pm_wrapper_create(const char* path){
 		//Try to get the pmem log buffer from pop
 		pmw->plogbuf = pm_pop_get_logbuf(pop);
 		if(!pmw->plogbuf){
-			printf("[PMEMOBJ_INFO] the pmem log buffer is empty\n");
+			printf("[PMEMOBJ_INFO] the pmem log buffer is empty. The server've shutdown normally\n");
 		}
 	}	
 	return pmw;
@@ -145,6 +147,7 @@ static inline void pm_wrapper_free(PMEM_WRAPPER* pmw){
 		pm_pop_free(pmw->pop);
 	pmw->plogbuf = NULL;
 	pmw->pop = NULL;
+	printf("PMEMOBJ_INFO: free PMEM_WRAPPER from heap allocated\n");
 	free(pmw);
 
 }
@@ -158,9 +161,13 @@ static inline void pm_pop_free(PMEMobjpool* pop){
 	POBJ_FOREACH_TYPE(pop, logbuf) {
 		TOID_ASSIGN(data, D_RW(logbuf)->data);
 		POBJ_FREE(&data);	
+
+		D_RW(logbuf)->lsn = 0;
+		D_RW(logbuf)->buf_free = 0;
+
 		POBJ_FREE(&logbuf);	
 	}
-
+	printf("PMEMOBJ_INFO: free PMEMobjpool from pmem\n");
 	/*Free DBWR*/
 
 	pmemobj_close(pop);
@@ -178,6 +185,8 @@ static inline PMEMoid pm_pop_alloc_bytes(PMEMobjpool* pop, size_t size){
 	}
 
 	pmemobj_persist(pop, D_RW(array), size * sizeof(*D_RW(array)));
+	printf("PMEMOBJ_INFO: allocate PMEMobjpool from pmem with size %zu MB\n", (size/1024));
+
 	//Check
 	char* p = (char*) pmemobj_direct(array.oid);
 	if(!p){
@@ -207,7 +216,9 @@ static inline PMEM_LOG_BUF* pm_pop_logbuf_alloc(PMEMobjpool* pop, const size_t s
 	PMEM_LOG_BUF *plogbuf = D_RW(logbuf);
 	plogbuf->size = size;
 	plogbuf->type = LOG_BUF_TYPE;
-
+	//we will update lsn, buf_free later
+	plogbuf->lsn = 0;
+	plogbuf->buf_free = 0;
 	plogbuf->data = pm_pop_alloc_bytes(pop, size);
 	if (OID_IS_NULL(plogbuf->data)){
 		//assert(0);
