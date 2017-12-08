@@ -72,6 +72,7 @@ POBJ_LAYOUT_END(my_pmemobj);
 static inline PMEM_WRAPPER* pm_wrapper_create(const char* path);
 static inline void pm_wrapper_free(PMEM_WRAPPER* pmw);
 static inline int pm_wrapper_logbuf_alloc(PMEM_WRAPPER* pmw, const size_t size);
+static inline int pm_wrapper_logbuf_realloc(PMEM_WRAPPER* pmw, const size_t size);
 static inline ssize_t  pm_wrapper_logbuf_io(PMEM_WRAPPER* pmw, 
 							const int type,
 							void* buf, 
@@ -82,6 +83,7 @@ static inline void* pm_wrapper_logbuf_get_logdata(PMEM_WRAPPER* pmw);
 static inline void pm_pop_free(PMEMobjpool* pop);
 static inline PMEM_LOG_BUF* pm_pop_get_logbuf(PMEMobjpool* pop);
 static inline PMEM_LOG_BUF* pm_pop_logbuf_alloc(PMEMobjpool* pop, const size_t size);
+static inline PMEM_LOG_BUF* pm_pop_logbuf_realloc(PMEMobjpool* pop, const size_t size);
 static inline PMEMoid pm_pop_alloc_bytes(PMEMobjpool* pop, size_t size);
 
 ///////////////////////////////////////////////////////////////////////////
@@ -219,6 +221,35 @@ static inline PMEM_LOG_BUF* pm_pop_logbuf_alloc(PMEMobjpool* pop, const size_t s
 	//we will update lsn, buf_free later
 	plogbuf->lsn = 0;
 	plogbuf->buf_free = 0;
+	plogbuf->data = pm_pop_alloc_bytes(pop, size);
+	if (OID_IS_NULL(plogbuf->data)){
+		//assert(0);
+		return NULL;
+	}
+
+	pmemobj_persist(pop, plogbuf, sizeof(*plogbuf));
+	return plogbuf;
+} 
+static inline int pm_wrapper_logbuf_realloc(PMEM_WRAPPER* pmw, const size_t size) {
+	assert(pmw);
+
+	pmw->plogbuf = pm_pop_logbuf_realloc(pmw->pop, size);
+	if (!pmw->plogbuf)
+		return PMEM_ERROR;
+	else
+		return PMEM_SUCCESS;
+}
+/*
+ * Re-Allocate new log buffer in persistent memory and assign to the pointer in the wrapper
+ * */
+static inline PMEM_LOG_BUF* pm_pop_logbuf_realloc(PMEMobjpool* pop, const size_t size) {
+
+	TOID(PMEM_LOG_BUF) logbuf; 
+
+	logbuf = POBJ_FIRST(pop, PMEM_LOG_BUF);
+	PMEM_LOG_BUF *plogbuf = D_RW(logbuf);
+
+	
 	plogbuf->data = pm_pop_alloc_bytes(pop, size);
 	if (OID_IS_NULL(plogbuf->data)){
 		//assert(0);

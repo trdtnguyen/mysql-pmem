@@ -4382,7 +4382,7 @@ innobase_commit(
 		innobase_commit_low(trx);
 
 		if (!read_only) {
-#if defined(UNIV_NVM_LOG_BUFFER) || defined(UNIV_PMEMOBJ_LOG)
+#if defined(UNIV_PMEMOBJ_LOG)
 			/*Set this flag to true make the trx_commit_complete_for_mysql() do nothing
 			//Since the log buffer now is in NVDIMM, we can safely skip writting
 			//and flushing log records when the transaction commit

@@ -5788,7 +5788,7 @@ fil_io(
 		? false : srv_read_only_mode,
 		node, message);
 
-#if defined (UNIV_NVM_LOG) || defined(UNIV_PMEMOBJ_LOG)
+#if defined (UNIV_NVM_LOG) 
 		if (req_type.is_log() && mode == OS_AIO_LOG){
 			//In NVM_LOG, we don't use aio, so we need to do the post-processing here
 			mutex_enter(&fil_system->mutex);
@@ -5796,7 +5796,7 @@ fil_io(
 			mutex_exit(&fil_system->mutex);
 			// log_io_complete() is called in the upper layer
 		}
-#endif /*UNIV_NVM_LOG || NVM_PMEMOBJ_LOG*/
+#endif /*UNIV_NVM_LOG */
 
 #endif /* UNIV_HOTBACKUP */
 
@@ -6023,7 +6023,7 @@ retry:
 		node->n_pending_flushes++;
 
 		mutex_exit(&fil_system->mutex);
-#if defined (UNIV_NVM_LOG) || defined(UNIV_PMEMOBJ_LOG)
+#if defined (UNIV_NVM_LOG) 
 		if ( space->purpose == FIL_TYPE_LOG ){
 			//we skip_flush, do nothing
 		}
