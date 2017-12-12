@@ -4271,7 +4271,6 @@ recv_recovery_from_checkpoint_start(
 	}
 
 	ut_memcpy(log_sys->buf, recv_sys->last_block, OS_FILE_LOG_BLOCK_SIZE);
-
 	log_sys->buf_free = (ulint) log_sys->lsn % OS_FILE_LOG_BLOCK_SIZE;
 	log_sys->buf_next_to_write = log_sys->buf_free;
 	log_sys->write_lsn = log_sys->lsn;
@@ -4288,6 +4287,42 @@ recv_recovery_from_checkpoint_start(
 		    log_sys->lsn - log_sys->last_checkpoint_lsn);
 
 	log_sys->next_checkpoint_no = checkpoint_no + 1;
+
+#if defined(UNIV_PMEMOBJ_LOG)
+	printf("[PMEMOBJ_LOG] Debug here\n");
+	ulint len = gb_pmw->plogbuf->buf_free - log_sys->buf_free;
+	ulint d_lsn = gb_pmw->plogbuf->lsn - log_sys->lsn;
+
+	if (d_lsn > 0 && len > 0) {
+
+		printf("[PMEMOBJ_INFO]!!!!!!!  Migration persistent log buffer to D-RAM log buffer and make the D-RAM log buffer persist\n");
+		//If the pmem log buffer is newer than current log buffer, we have more work to do
+		byte* p_old = (byte*) pm_wrapper_logbuf_get_logdata(gb_pmw);
+		byte* p_new;
+
+		size_t size = gb_pmw->plogbuf->size;
+
+		ut_memcpy(log_sys->buf + log_sys->buf_free, p_old + log_sys->buf_free, len);
+
+		log_sys->buf_free += len;
+		log_sys->lsn += d_lsn;
+		//reallocate the log buffer in PMEM
+		pm_wrapper_logbuf_realloc(gb_pmw, size);
+		p_new = (byte*) pm_wrapper_logbuf_get_logdata(gb_pmw); 
+		//copy the log records from D-RAM heap
+		pmemobj_memcpy_persist(gb_pmw->pop, p_new, log_sys->buf_ptr, log_sys->buf_free);
+		//We free the heap from DRAM
+		ut_free(log_sys->buf_ptr);
+
+		log_sys->buf_ptr = static_cast<byte*> (pm_wrapper_logbuf_get_logdata(gb_pmw));
+		log_sys->buf = static_cast<byte*>(
+				ut_align(log_sys->buf_ptr, OS_FILE_LOG_BLOCK_SIZE));
+		
+		gb_pmw->plogbuf->lsn = log_sys->lsn;
+		gb_pmw->plogbuf->buf_free = log_sys->buf_free;
+	}
+
+#endif
 
 	mutex_enter(&recv_sys->mutex);
 

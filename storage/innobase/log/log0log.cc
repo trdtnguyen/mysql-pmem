@@ -224,7 +224,42 @@ log_buffer_extend(
 
 	log_sys->buf_free -= move_start;
 	log_sys->buf_next_to_write -= move_start;
+#if defined (UNIV_PMEMOBJ_LOG)
+	/* reallocate log buffer */
+	srv_log_buffer_size = len / UNIV_PAGE_SIZE + 1;
+	//do not free here, does it by our API
+	//ut_free(log_sys->buf_ptr);
 
+	log_sys->buf_size = LOG_BUFFER_SIZE;
+
+	//log_sys->buf_ptr = static_cast<byte*>(
+	//	ut_zalloc_nokey(log_sys->buf_size * 2 + OS_FILE_LOG_BLOCK_SIZE));
+	if ( pm_wrapper_logbuf_realloc(gb_pmw, 2 * LOG_BUFFER_SIZE + OS_FILE_LOG_BLOCK_SIZE) 
+			== PMEM_ERROR) {
+		printf("PMEMOBJ_ERROR: error when reallocate log buffer in log_buffer_extend()\n");
+	}
+	else {
+
+	}
+
+	log_sys->buf = static_cast<byte*>(pm_wrapper_logbuf_get_logdata(gb_pmw));
+
+	log_sys->first_in_use = true;
+
+	log_sys->max_buf_free = log_sys->buf_size / LOG_BUF_FLUSH_RATIO
+		- LOG_BUF_FLUSH_MARGIN;
+
+	/* restore the last log block */
+	//ut_memcpy(log_sys->buf, tmp_buf, move_end - move_start);
+	pmemobj_memcpy_persist(gb_pmw->pop, log_sys->buf, tmp_buf, move_end - move_start);
+	//set the flag
+	gb_pmw->plogbuf->need_recv = true;
+
+	//Update lsn and buf_free
+	gb_pmw->plogbuf->lsn = log_sys->lsn;
+	gb_pmw->plogbuf->buf_free = log_sys->buf_free;	
+
+#else //original
 	/* reallocate log buffer */
 	srv_log_buffer_size = len / UNIV_PAGE_SIZE + 1;
 	ut_free(log_sys->buf_ptr);
@@ -243,6 +278,8 @@ log_buffer_extend(
 
 	/* restore the last log block */
 	ut_memcpy(log_sys->buf, tmp_buf, move_end - move_start);
+#endif /* UNIV_PMEMOBJ_LOG */
+
 
 	ut_ad(log_sys->is_extending);
 	log_sys->is_extending = false;
@@ -438,6 +475,8 @@ part_loop:
 #if defined (UNIV_PMEMOBJ_LOG)
 	//copy the trasaction's log records to persistent memory
 	pmemobj_memcpy_persist(gb_pmw->pop, log->buf + log->buf_free, str, len);
+	//set the flag here
+	gb_pmw->plogbuf->need_recv = true;
 #else //original
 	ut_memcpy(log->buf + log->buf_free, str, len);
 #endif /* UNIV_PMEMOBJ_LOG */
@@ -828,13 +867,23 @@ log_init(void)
 				== PMEM_ERROR) {
 			printf("PMEMOBJ_ERROR: error when allocate log buffer in log_init()\n");
 		}
+		//The server is previously shutdown normally. We assign the log buffer now
+		log_sys->buf_ptr = static_cast<byte*> (pm_wrapper_logbuf_get_logdata(gb_pmw));
 	}
 	else {
 		printf("!!!!!!! [PMEMOBJ_INFO]: the server restart from a crash but the log buffer is persist, in pmem: size = %zd lsn = %"PRIu64" \n", 
 				gb_pmw->plogbuf->size, gb_pmw->plogbuf->lsn);
-		//do some work here 
+		/*The server is crash and does not shutdown normally
+		 * our log buffer in pmem has some log records that have not sync to log files
+		 * temporary log_sys->buf_ptr use allocated heap from DRAM
+		 * we will assign it to our pmem heap later in recv_recovery_from_checkpoint_start()
+		 * */
+		log_sys->buf_ptr = static_cast<byte*>(
+			ut_zalloc_nokey(log_sys->buf_size * 2 + OS_FILE_LOG_BLOCK_SIZE));
+		//double check the need_recv flag
+	//	assert(gb_pmw->plogbuf->need_recv);
+
 	}
-	log_sys->buf_ptr = static_cast<byte*> (pm_wrapper_logbuf_get_logdata(gb_pmw));
 #else //original
 	log_sys->buf_ptr = static_cast<byte*>(
 		ut_zalloc_nokey(log_sys->buf_size * 2 + OS_FILE_LOG_BLOCK_SIZE));

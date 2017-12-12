@@ -399,7 +399,12 @@ log_reserve_and_write_fast(
 		len += lsn_len;
 	} else
 #endif /* UNIV_LOG_LSN_DEBUG */
+
+#if defined(UNIV_PMEMOBJ_LOG)
+	pmemobj_memcpy_persist(gb_pmw->pop, log_sys->buf + log_sys->buf_free, str, len);
+#else //original
 	memcpy(log_sys->buf + log_sys->buf_free, str, len);
+#endif /*UNIV_PMEMOBJ_LOG*/
 
 	log_block_set_data_len(
                 reinterpret_cast<byte*>(ut_align_down(

@@ -5798,6 +5798,13 @@ fil_io(
 		}
 #endif /*UNIV_NVM_LOG */
 
+#if defined (UNIV_PMEMOBJ_DBW) 
+		if (space == TRX_SYS_SPACE) {
+
+		}
+#endif /* UNIV_PMEMOBJ_DBW */
+	
+
 #endif /* UNIV_HOTBACKUP */
 
 	if (err == DB_IO_NO_PUNCH_HOLE) {
