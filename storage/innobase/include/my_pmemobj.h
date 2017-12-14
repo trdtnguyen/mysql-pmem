@@ -27,6 +27,7 @@
 #include "my_pmem_common.h"
 //cc -std=gnu99 ... -lpmemobj -lpmem
 
+#define PMEMOBJ_FILE_NAME "pmemobjfile"
 //OS_FILE_LOG_BLOCK_SIZE =512 is defined in os0file.h
 static const size_t PMEM_MB = 1024 * 1024;
 static const size_t PMEM_MAX_LOG_BUF_SIZE = 1 * 1024 * PMEM_MB;

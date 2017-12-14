@@ -178,8 +178,8 @@ static pfs_os_file_t	files[1000];
 PMEM_FILE_COLL* gb_pfc;
 #endif
 #if defined (UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_DBW)
-/*globel PMEMobjpool*/
-const char* PMEM_FILE_PATH = "/mnt/pmem01/mapfile";
+/*global PMEMobjpool*/
+char  PMEM_FILE_PATH [PMEM_MAX_FILE_NAME_LENGTH];
 PMEM_WRAPPER* gb_pmw;
 pfs_os_file_t gb_dbw_file;
 #endif //UNIV_PMEMOBJ_LOG
@@ -1481,22 +1481,6 @@ innobase_start_or_create_for_mysql(void)
 	char*		logfile0	= NULL;
 	size_t		dirnamelen;
 	unsigned	i = 0;
-#ifdef UNIV_NVM_LOG
-//tdnguyen
-	ib::info() << "Hello NVM Log from VLDB lab ========\n";
-	gb_pfc = pfc_new(srv_log_file_size);
-#endif
-#if defined (UNIV_PMEMOBJ_LOG) || defined(UNIV_PMEMOBJ_DBW)
-	#ifdef UNIV_PMEMOBJ_LOG
-		ib::info() << "======= Hello PMEMOBJ Log from VLDB lab ========\n";
-	#endif
-	#ifdef UNIV_PMEMOBJ_DBW
-		ib::info() << "======= Hello PMEMOBJ Double Write Buffer from VLDB lab ========\n";
-	#endif
-//	gb_pop = pmem_create_PMEMobjpool(srv_log_group_home_dir);
-	gb_pmw = pm_wrapper_create(PMEM_FILE_PATH);
-	assert(gb_pmw);
-#endif
 
 	/* Reset the start state. */
 	srv_start_state = SRV_START_STATE_NONE;
@@ -1753,6 +1737,23 @@ innobase_start_or_create_for_mysql(void)
 		srv_n_page_cleaners = srv_buf_pool_instances;
 	}
 
+#ifdef UNIV_NVM_LOG
+//tdnguyen
+	ib::info() << "Hello NVM Log from VLDB lab ========\n";
+	gb_pfc = pfc_new(srv_log_file_size);
+#endif
+#if defined (UNIV_PMEMOBJ_LOG) || defined(UNIV_PMEMOBJ_DBW)
+	#ifdef UNIV_PMEMOBJ_LOG
+		ib::info() << "======= Hello PMEMOBJ Log from VLDB lab ========\n";
+	#endif
+	#ifdef UNIV_PMEMOBJ_DBW
+		ib::info() << "======= Hello PMEMOBJ Double Write Buffer from VLDB lab ========\n";
+	#endif
+//	gb_pop = pmem_create_PMEMobjpool(srv_log_group_home_dir);
+	sprintf(PMEM_FILE_PATH, "%s/%s",srv_log_group_home_dir, PMEMOBJ_FILE_NAME);
+	gb_pmw = pm_wrapper_create(PMEM_FILE_PATH);
+	assert(gb_pmw);
+#endif
 	srv_boot();
 
 	ib::info() << (ut_crc32_sse2_enabled ? "Using" : "Not using")
