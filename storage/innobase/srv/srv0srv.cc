@@ -2236,7 +2236,13 @@ srv_master_do_idle_tasks(void)
 		MONITOR_SRV_DICT_LRU_MICROSECOND, counter_time);
 
 	/* Flush logs if needed */
+#if defined (UNIV_PMEMOBJ_LOG)
+	//We skip the 1s flush log here
+	//Log will flush at log_checkpoint() and when the log buffer is nearly full
+	//See log_reserve_and_open()
+#else //original
 	srv_sync_log_buffer_in_background();
+#endif
 	MONITOR_INC_TIME_IN_MICRO_SECS(
 		MONITOR_SRV_LOG_FLUSH_MICROSECOND, counter_time);
 

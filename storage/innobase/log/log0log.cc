@@ -934,7 +934,7 @@ log_init(void)
 	if(gb_pmw->plogbuf->lsn < log_sys->lsn)
 		gb_pmw->plogbuf->lsn = log_sys->lsn;
 	if(gb_pmw->plogbuf->buf_free < log_sys->buf_free)
-		gb_pmw->plogbuf->buf_free = log_sys->buf_free;
+		gb_pmw->plogbuf->last_tsec_buf_free = gb_pmw->plogbuf->buf_free = log_sys->buf_free;
 #endif /* UNIV_PMEMOBJ_LOG */
 	MONITOR_SET(MONITOR_LSN_CHECKPOINT_AGE,
 		    log_sys->lsn - log_sys->last_checkpoint_lsn);

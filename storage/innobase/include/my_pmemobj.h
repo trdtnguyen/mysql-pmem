@@ -60,6 +60,7 @@ struct __pmem_log_buf {
 	bool need_recv; /*need recovery, it is set to false when init and when the server shutdown
 					  normally. Whenever a log record is copy to log buffer, this flag is set to true
 	*/
+	uint64_t last_tsec_buf_free; /*the buf_free updated in previous t seconds, update this value in srv_sync_log_buffer_in_background() */
 };
 struct __pmem_dbw {
 	size_t size;
@@ -278,9 +279,9 @@ static inline PMEM_LOG_BUF* pm_pop_logbuf_alloc(PMEMobjpool* pop, const size_t s
 	//we will update lsn, buf_free later
 	plogbuf->lsn = 0;
 	plogbuf->buf_free = 0;
+	plogbuf->last_tsec_buf_free = 0;
 	/*Read the note about need_recv flag*/
 	plogbuf->need_recv = false; 
-
 	plogbuf->data = pm_pop_alloc_bytes(pop, size);
 	if (OID_IS_NULL(plogbuf->data)){
 		//assert(0);
@@ -381,6 +382,7 @@ static inline void* pm_wrapper_logbuf_get_logdata(PMEM_WRAPPER* pmw){
 	assert(pmw->plogbuf);
 	return pmemobj_direct(pmw->plogbuf->data);
 }
+
 
 /*** DOUBLE WRITE BUFFER                          ***/
 
