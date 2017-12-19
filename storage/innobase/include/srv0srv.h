@@ -268,6 +268,9 @@ extern const ulong	srv_tmp_undo_logs;
 /** Default size of UNDO tablespace while it is created new. */
 extern const ulint	SRV_UNDO_TABLESPACE_SIZE_IN_PAGES;
 
+#if defined(UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_LOG) 
+extern char*	srv_pmem_home_dir;
+#endif 
 extern char*	srv_log_group_home_dir;
 
 #ifndef UNIV_HOTBACKUP

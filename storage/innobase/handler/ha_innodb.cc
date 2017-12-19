@@ -3693,7 +3693,11 @@ innobase_init(
 	/* -------------- All log files ---------------------------*/
 
 	/* The default dir for log files is the datadir of MySQL */
-
+#if defined(UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_LOG)
+	if (!srv_pmem_home_dir) {
+		srv_pmem_home_dir = (char*) "/mnt/pmem1";
+	}
+#endif
 	if (!srv_log_group_home_dir) {
 		srv_log_group_home_dir = default_path;
 	}
@@ -19442,7 +19446,11 @@ static MYSQL_SYSVAR_BOOL(locks_unsafe_for_binlog, innobase_locks_unsafe_for_binl
   " Please use READ COMMITTED transaction isolation level instead."
   " Force InnoDB to not use next-key locking, to use only row-level locking.",
   NULL, NULL, FALSE);
-
+#if defined (UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_LOG) 
+static MYSQL_SYSVAR_STR(pmem_home_dir, srv_pmem_home_dir,
+  PLUGIN_VAR_RQCMDARG | PLUGIN_VAR_READONLY,
+  "Path to InnoDB log files.", NULL, NULL, NULL);
+#endif
 static MYSQL_SYSVAR_STR(log_group_home_dir, srv_log_group_home_dir,
   PLUGIN_VAR_RQCMDARG | PLUGIN_VAR_READONLY,
   "Path to InnoDB log files.", NULL, NULL, NULL);
@@ -20250,6 +20258,9 @@ static struct st_mysql_sys_var* innobase_system_variables[]= {
   MYSQL_SYSVAR(log_file_size),
   MYSQL_SYSVAR(log_files_in_group),
   MYSQL_SYSVAR(log_write_ahead_size),
+#if defined (UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_LOG) 
+  MYSQL_SYSVAR(pmem_home_dir),
+#endif
   MYSQL_SYSVAR(log_group_home_dir),
   MYSQL_SYSVAR(log_compressed_pages),
   MYSQL_SYSVAR(max_dirty_pages_pct),
