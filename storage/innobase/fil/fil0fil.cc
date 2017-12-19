@@ -61,7 +61,7 @@ Created 10/25/1995 Heikki Tuuri
 //declare it at storage/innobase/srv/srv0start.cc
 extern PMEM_FILE_COLL* gb_pfc;
 #endif
-#ifdef UNIV_PMEMOBJ_LOG
+#if defined (UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_DBW) || defined(UNIV_PMEMOBJ_BUF)
 #include "my_pmemobj.h"
 extern PMEM_WRAPPER* gb_pmw;
 #endif
@@ -5788,6 +5788,8 @@ fil_io(
 		? false : srv_read_only_mode,
 		node, message);
 
+#endif /* UNIV_HOTBACKUP */
+
 #if defined (UNIV_NVM_LOG) 
 		if (req_type.is_log() && mode == OS_AIO_LOG){
 			//In NVM_LOG, we don't use aio, so we need to do the post-processing here
@@ -5803,9 +5805,6 @@ fil_io(
 
 		}
 #endif /* UNIV_PMEMOBJ_DBW */
-	
-
-#endif /* UNIV_HOTBACKUP */
 
 	if (err == DB_IO_NO_PUNCH_HOLE) {
 
@@ -5894,7 +5893,20 @@ fil_aio_wait(
 		/* async single page writes from the dblwr buffer don't have
 		access to the page */
 		if (message != NULL) {
+#if defined (UNIV_PMEMOBJ_BUF)
+			TOID(PMEM_BUF_BLOCK)* block = static_cast<TOID(PMEM_BUF_BLOCK)*> (message);
+			PMEM_BUF_BLOCK* pblock = D_RW(*block);
+			if (pblock != NULL && pblock->check == PMEM_AIO_CHECK) {
+				buf_page_t* bpage = pblock->bpage;
+				buf_page_io_complete(bpage);
+				pm_buf_write_aio_complete(gb_pmw->pop, gb_pmw->pbuf, *block);
+			}
+			else {
+				buf_page_io_complete(static_cast<buf_page_t*>(message));
+			}
+#else //original
 			buf_page_io_complete(static_cast<buf_page_t*>(message));
+#endif /* UNIV_PMEMOBJ_BUF*/
 		}
 		return;
 	case FIL_TYPE_LOG:
@@ -7562,19 +7574,11 @@ test_make_filepath()
 	path = MF(NULL, "dbname\\tablespacename", NO_EXT, false); DISPLAY;
 	path = MF(NULL, "dbname\\tablespacename", IBD, false); DISPLAY;
 	path = MF("/this/is/a/path", "dbname/tablespacename", IBD, false); DISPLAY;
-	path = MF("/this/is/a/path", "dbname/tablespacename", IBD, true); DISPLAY;
-	path = MF("./this/is/a/path", "dbname/tablespacename.ibd", IBD, true); DISPLAY;
-	path = MF("this\\is\\a\\path", "dbname/tablespacename", IBD, true); DISPLAY;
-	path = MF("/this/is/a/path", "dbname\\tablespacename", IBD, true); DISPLAY;
-	path = MF(long_path, NULL, IBD, false); DISPLAY;
-	path = MF(long_path, "tablespacename", IBD, false); DISPLAY;
-	path = MF(long_path, "tablespacename", IBD, true); DISPLAY;
 }
 #endif /* UNIV_ENABLE_UNIT_TEST_MAKE_FILEPATH */
 /* @} */
-
 /** Release the reserved free extents.
-@param[in]	n_reserved	number of reserved extents */
+@param[in]  n_reserved  number of reserved extents */
 void
 fil_space_t::release_free_extents(ulint	n_reserved)
 {

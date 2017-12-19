@@ -40,6 +40,12 @@ Created 11/5/1995 Heikki Tuuri
 #include "srv0start.h"
 #include "srv0srv.h"
 
+#if defined (UNIV_PMEMOBJ_BUF)
+#include "my_pmemobj.h"
+#include <libpmemobj.h>
+extern PMEM_WRAPPER* gb_pmw;
+#endif /* UNIV_PMEMOBJ_BUF */
+
 /** There must be at least this many pages in buf_pool in the area to start
 a random read-ahead */
 #define BUF_READ_AHEAD_RANDOM_THRESHOLD(b)	\
@@ -187,7 +193,13 @@ buf_read_page_low(
 			sync = true;
 		}
 	);
-
+#if defined (UNIV_PMEMOBJ_BUF)
+size_t read_bytes=  pm_buf_read(gb_pmw->pop, gb_pmw->pbuf, page_id, dst);
+	if (read_bytes > 0) {
+	}
+	else {
+	// if the page_id is not in pmem buffer, read it from disk as normal
+#endif /*UNIV_PMEMOBJ_BUF*/
 	IORequest	request(type | IORequest::READ);
 
 	*err = fil_io(
@@ -219,7 +231,9 @@ buf_read_page_low(
 
 		ut_error;
 	}
-
+#if defined (UNIV_PMEMOBJ_BUF)
+}//end if
+#endif 
 	if (sync) {
 		/* The i/o is already completed when we arrive from
 		fil_read */
@@ -227,7 +241,6 @@ buf_read_page_low(
 			return(0);
 		}
 	}
-
 	return(1);
 }
 

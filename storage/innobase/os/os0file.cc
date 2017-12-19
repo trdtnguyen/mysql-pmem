@@ -39,11 +39,6 @@ Created 10/21/1995 Heikki Tuuri
 extern PMEM_FILE_COLL* gb_pfc;
 #endif
 
-#ifdef UNIV_PMEMOBJ_LOG
-#include "my_pmemobj.h"
-extern PMEM_WRAPPER* gb_pmw;
-#endif
-
 #ifndef UNIV_INNOCHECKSUM
 
 #include "ha_prototypes.h"

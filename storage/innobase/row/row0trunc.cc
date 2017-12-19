@@ -44,7 +44,7 @@ extern PMEM_FILE_COLL* gb_pfc;
 #endif
 #ifdef UNIV_PMEMOBJ_LOG
 #include "my_pmemobj.h"
-extern PMEM_WRAPPER* gb_pmw;
+//extern PMEM_WRAPPER* gb_pmw;
 #endif
 
 bool	truncate_t::s_fix_up_active = false;

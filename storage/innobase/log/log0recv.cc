@@ -68,6 +68,11 @@ bool	recv_replay_file_ops	= true;
 #include "fut0lst.h"
 #endif /* !UNIV_HOTBACKUP */
 
+#if defined(UNIV_PMEMOBJ_LOG)
+#include "my_pmemobj.h"
+extern PMEM_WRAPPER* gb_pmw;
+#endif
+
 /** Log records are stored in the hash table in chunks at most of this size;
 this must be less than UNIV_PAGE_SIZE as it is stored in the buffer pool */
 #define RECV_DATA_BLOCK_SIZE	(MEM_MAX_ALLOC_IN_BUF - sizeof(recv_data_t))

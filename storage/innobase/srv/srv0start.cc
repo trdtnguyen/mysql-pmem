@@ -116,7 +116,7 @@ extern bool srv_lzo_disabled;
 #include "pmem_log.h"
 #endif
 
-#if defined (UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_DBW)
+#if defined (UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_BUF)
 #include <libpmem.h>
 #include <libpmemobj.h>
 #include "my_pmemobj.h"
@@ -177,10 +177,10 @@ static pfs_os_file_t	files[1000];
 /** global PMEM_FILE_COLL object*/
 PMEM_FILE_COLL* gb_pfc;
 #endif
-#if defined (UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_DBW)
+#if defined (UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_BUF)
 /*global PMEMobjpool*/
 char  PMEM_FILE_PATH [PMEM_MAX_FILE_NAME_LENGTH];
-PMEM_WRAPPER* gb_pmw;
+extern PMEM_WRAPPER* gb_pmw;
 pfs_os_file_t gb_dbw_file;
 #endif //UNIV_PMEMOBJ_LOG
 /** io_handler_thread parameters for thread identification */
@@ -1742,12 +1742,15 @@ innobase_start_or_create_for_mysql(void)
 	ib::info() << "Hello NVM Log from VLDB lab ========\n";
 	gb_pfc = pfc_new(srv_log_file_size);
 #endif
-#if defined (UNIV_PMEMOBJ_LOG) || defined(UNIV_PMEMOBJ_DBW)
+#if defined (UNIV_PMEMOBJ_LOG) || defined(UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_BUF)
 	#ifdef UNIV_PMEMOBJ_LOG
 		ib::info() << "======= Hello PMEMOBJ Log from VLDB lab ========\n";
 	#endif
 	#ifdef UNIV_PMEMOBJ_DBW
 		ib::info() << "======= Hello PMEMOBJ Double Write Buffer from VLDB lab ========\n";
+	#endif
+	#ifdef UNIV_PMEMOBJ_BUF
+		ib::info() << "======= Hello PMEMOBJ Buffer from VLDB lab ========\n";
 	#endif
 //	gb_pop = pmem_create_PMEMobjpool(srv_log_group_home_dir);
 	sprintf(PMEM_FILE_PATH, "%s/%s",srv_log_group_home_dir, PMEMOBJ_FILE_NAME);

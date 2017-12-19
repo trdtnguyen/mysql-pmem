@@ -4391,7 +4391,7 @@ innobase_commit(
 			trx->flush_log_later = true;
 #else //original
 			trx->flush_log_later = false;
-#endif /*UNIV_NVM_LOG_BUFFER */
+#endif /*UNIV_PMEMOBJ_LOG */
 			if (innobase_commit_concurrency > 0) {
 
 				mysql_mutex_lock(&commit_cond_m);

@@ -61,6 +61,12 @@ Created 11/11/1995 Heikki Tuuri
 static const int buf_flush_page_cleaner_priority = -20;
 #endif /* UNIV_LINUX */
 
+#if defined(UNIV_PMEMOBJ_BUF)
+#include "my_pmemobj.h"
+#include <libpmemobj.h>
+extern PMEM_WRAPPER* gb_pmw;
+#endif /* UNIV_PMEMOBJ_BUF */
+
 /** Sleep time in microseconds for loop waiting for the oldest
 modification lsn */
 static const ulint buf_flush_wait_flushed_sleep_time = 10000;
@@ -800,8 +806,11 @@ buf_flush_write_complete(
 
 		os_event_set(buf_pool->no_flush[flush_type]);
 	}
-
+#if defined(UNIV_PMEMOBJ_BUF)
+	//we do not need this anymore 
+#else //original
 	buf_dblwr_update(bpage, flush_type);
+#endif /* UNIV_PMEMOBJ_BUF */
 }
 #endif /* !UNIV_HOTBACKUP */
 
@@ -1071,7 +1080,17 @@ buf_flush_write_block_low(
 			fsp_is_checksum_disabled(bpage->id.space()));
 		break;
 	}
-
+#if defined(UNIV_PMEMOBJ_BUF)
+	//If pmem buffer is used:
+	//(1) we don't need writes to double write buffer
+	//(2) we also don't need to write and flush pages to disk
+	//(3) just memcpy to our buffer in pmem
+	// Single write is treated similar with batch write
+	int ret = pm_buf_write(gb_pmw->pop, gb_pmw->pbuf, bpage,(void*) ((buf_block_t*) bpage)->frame);
+	assert(ret == PMEM_SUCCESS);
+	//After memcpy, We need this call to sync the buffer pool variables	
+	buf_page_io_complete(bpage, true);
+#else //original
 	/* Disable use of double-write buffer for temporary tablespace.
 	Given the nature and load of temporary tablespace doublewrite buffer
 	adds an overhead during flushing. */
@@ -1110,6 +1129,7 @@ buf_flush_write_block_low(
 		LRU list as well. */
 		buf_page_io_complete(bpage, true);
 	}
+#endif /*UNIV_PMEMOBJ_BUF*/
 
 	/* Increment the counter of I/O operations used
 	for selecting LRU policy. */

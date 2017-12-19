@@ -37,7 +37,7 @@ Created 2011/12/19
 #include "page0zip.h"
 #include "trx0sys.h"
 
-#if defined (UNIV_PMEMOBJ_DBW)
+#if defined (UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_DBW)
 #include "my_pmemobj.h"
 extern PMEM_WRAPPER* gb_pmw;
 extern pfs_os_file_t gb_dbw_file;
@@ -162,6 +162,19 @@ buf_dblwr_init(
 
 	buf_dblwr->in_use = static_cast<bool*>(
 		ut_zalloc_nokey(buf_size * sizeof(bool)));
+#if defined (UNIV_PMEMOBJ_BUF)
+	//Allocate the buffer in pmem
+	if (!gb_pmw->pbuf) {
+		if ( pm_wrapper_buf_alloc(gb_pmw, (1 + buf_size) * UNIV_PAGE_SIZE, UNIV_PAGE_SIZE) == PMEM_ERROR ) {
+			printf("PMEMOBJ_ERROR: error when allocate buffer in buf_dblwr_init()\n");
+		}
+	}
+	else {
+		printf("!!!!!!! [PMEMOBJ_INFO]: the server restart from a crash but the buffer is persist, in pmem: size = %zd free list size = %zd\n", 
+				gb_pmw->pbuf->size, D_RW(gb_pmw->pbuf->free)->cur_size);
+	}
+	//[TODO] Recovery handler
+#endif /* UNIV_PMEMOBJ_BUF */
 #if defined (UNIV_PMEMOBJ_DBW)
 	//Allocate the double write buffer on PMEM
 	if (!gb_pmw->pdbw){
