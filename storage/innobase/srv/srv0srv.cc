@@ -203,6 +203,8 @@ extern bool		trx_commit_disallowed;
 /*------------------------- LOG FILES ------------------------ */
 #if defined(UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_LOG) 
 char*	srv_pmem_home_dir	= NULL;
+ulong	srv_pmem_pool_size	= 8 * 1024;
+ulong	srv_pmem_buf_size	= 4 * 1024;
 #endif
 char*	srv_log_group_home_dir	= NULL;
 

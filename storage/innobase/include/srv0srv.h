@@ -270,6 +270,8 @@ extern const ulint	SRV_UNDO_TABLESPACE_SIZE_IN_PAGES;
 
 #if defined(UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_LOG) 
 extern char*	srv_pmem_home_dir;
+extern ulong	srv_pmem_pool_size;
+extern ulong	srv_pmem_buf_size;
 #endif 
 extern char*	srv_log_group_home_dir;
 

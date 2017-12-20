@@ -22,7 +22,6 @@
 #define PMEM_MAX_FILES 1000
 #define PMEM_MAX_FILE_NAME_LENGTH 10000
 #define PMEM_HASH_MASK 1653893711
-#define PMEM_BUF_THRESHOLD 0.8
 
 //random number for checking AIO
 #define PMEM_AIO_CHECK 7988
@@ -40,6 +39,8 @@ static const size_t PMEM_PAGE_SIZE = 16*1024; //16KB
 static const size_t PMEM_MAX_DBW_PAGES= 128; // 2 * extent_size
 
 #define PMEM_N_BUCKETS 128 
+#define PMEM_MAX_LISTS_PER_BUCKET 4 
+#define PMEM_BUF_THRESHOLD 0.8
 
 
 enum {

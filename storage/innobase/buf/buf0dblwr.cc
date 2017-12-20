@@ -165,13 +165,15 @@ buf_dblwr_init(
 #if defined (UNIV_PMEMOBJ_BUF)
 	//Allocate the buffer in pmem
 	if (!gb_pmw->pbuf) {
-		if ( pm_wrapper_buf_alloc(gb_pmw, (1 + buf_size) * UNIV_PAGE_SIZE, UNIV_PAGE_SIZE) == PMEM_ERROR ) {
+		size_t buf_size = srv_pmem_buf_size * 1024 * 1024;
+			printf("PMEMOBJ_INFO: allocate %zd MB of buffer in pmem\n", srv_pmem_buf_size);
+		if ( pm_wrapper_buf_alloc(gb_pmw, buf_size, UNIV_PAGE_SIZE) == PMEM_ERROR ) {
 			printf("PMEMOBJ_ERROR: error when allocate buffer in buf_dblwr_init()\n");
 		}
 	}
 	else {
-		printf("!!!!!!! [PMEMOBJ_INFO]: the server restart from a crash but the buffer is persist, in pmem: size = %zd free list size = %zd\n", 
-				gb_pmw->pbuf->size, D_RW(gb_pmw->pbuf->free)->cur_size);
+		printf("!!!!!!! [PMEMOBJ_INFO]: the server restart from a crash but the buffer is persist, in pmem: size = %zd free list has = %zd pages\n", 
+				gb_pmw->pbuf->size, D_RW(gb_pmw->pbuf->free)->cur_pages);
 	}
 	//[TODO] Recovery handler
 #endif /* UNIV_PMEMOBJ_BUF */

@@ -69,13 +69,14 @@ pm_buf_list_init(PMEMobjpool* pop, PMEM_BUF* buf, const size_t list_size, const 
 	PMEM_BUF_BLOCK_LIST* plist;
 
 	size_t n_pages = (list_size / page_size) + 1;
-
+	size_t bucket_size = list_size / (PMEM_N_BUCKETS * PMEM_MAX_LISTS_PER_BUCKET);
+	printf("========= PMEM_INFO: bucket size = %f MB (%f %d-KB pages) \n", bucket_size*1.0 / (1024*1024), (bucket_size*1.0/page_size), (page_size/1024));
 	//The free list
 	POBJ_ZNEW(pop, &buf->free, PMEM_BUF_BLOCK_LIST);
 	pfreelist = D_RW(buf->free);
 
-	pfreelist->cur_size = 0;
-	pfreelist->max_size = list_size;
+	pfreelist->cur_pages = 0;
+	pfreelist->max_pages = list_size / page_size;
 	pfreelist->is_flush = false;
 	//pfreelist->pext_list = NULL;
 	TOID_ASSIGN(pfreelist->pext_list, OID_NULL) ;
@@ -95,12 +96,12 @@ pm_buf_list_init(PMEMobjpool* pop, PMEM_BUF* buf, const size_t list_size, const 
 		offset += page_size;	
 
 		POBJ_LIST_INSERT_NEW_HEAD(pop, &( D_RW(buf->free)->head), entries, sizeof(PMEM_BUF_BLOCK), pm_buf_block_init, args); 
-		D_RW(buf->free)->cur_size++;
+		D_RW(buf->free)->cur_pages++;
 	}
 	free(args);
 
-	pmemobj_persist(pop, &pfreelist->cur_size, sizeof(pfreelist->cur_size) );
-	pmemobj_persist(pop, &pfreelist->max_size, sizeof(pfreelist->max_size) );
+	pmemobj_persist(pop, &pfreelist->cur_pages, sizeof(pfreelist->cur_pages) );
+	pmemobj_persist(pop, &pfreelist->max_pages, sizeof(pfreelist->max_pages) );
 	pmemobj_persist(pop, &pfreelist->is_flush, sizeof(pfreelist->is_flush) );
 	pmemobj_persist(pop, &pfreelist->pext_list, sizeof(pfreelist->pext_list) );
 
@@ -121,14 +122,14 @@ pm_buf_list_init(PMEMobjpool* pop, PMEM_BUF* buf, const size_t list_size, const 
 			assert(0);
 		}
 		plist = D_RW(D_RW(buf->buckets)[i]);
-		plist->cur_size = 0;
-		plist->max_size = list_size;
+		plist->cur_pages = 0;
+		plist->max_pages = bucket_size / page_size;
 		plist->is_flush = false;
 		//plist->pext_list = NULL;
 		TOID_ASSIGN(plist->pext_list, OID_NULL);
 
-		pmemobj_persist(pop, &plist->cur_size, sizeof(plist->cur_size));
-		pmemobj_persist(pop, &plist->max_size, sizeof(plist->max_size));
+		pmemobj_persist(pop, &plist->cur_pages, sizeof(plist->cur_pages));
+		pmemobj_persist(pop, &plist->max_pages, sizeof(plist->max_pages));
 		pmemobj_persist(pop, &plist->is_flush, sizeof(plist->is_flush));
 		pmemobj_persist(pop, &plist->pext_list, sizeof(plist->pext_list));
 		pmemobj_persist(pop, plist, sizeof(*plist));
@@ -227,6 +228,7 @@ pm_buf_write(PMEMobjpool* pop, PMEM_BUF* buf, buf_page_t* bpage, void* src_data)
 		if (TOID_IS_NULL(free_block)) {
 			printf("PMEM_INFO: there is no free block in pmem buffer\n");
 			//[TODO] wait from some seconds or extend the buffer
+			pm_buf_print_lists_info(buf);
 			return PMEM_ERROR;
 		}
 		
@@ -240,18 +242,20 @@ pm_buf_write(PMEMobjpool* pop, PMEM_BUF* buf, buf_page_t* bpage, void* src_data)
 
 		//move the block from the free list to the buf list
 		POBJ_LIST_MOVE_ELEMENT_TAIL(pop, &( D_RW(buf->free)->head), &(plist->head), free_block, entries, entries);
-		D_RW(buf->free)->cur_size--;
-		plist->cur_size++;
-
+		D_RW(buf->free)->cur_pages--;
+		plist->cur_pages++;
+#if defined(UNIV_PMEMOBJ_BUF_DEBUG)
+		printf("PMEM_DEBUG:  in pm_buf_write(), freelist: cur_pages %zd \n", D_RW(buf->free)->cur_pages);
+#endif 
 		//If the current buf is nearly full, flush pages to disk
-		if (plist->cur_size >= plist->max_size * PMEM_BUF_THRESHOLD) {
+		if (plist->cur_pages >= plist->max_pages * PMEM_BUF_THRESHOLD) {
 			plist->is_flush = true;
 			//Allocate a new list
 			TOID(PMEM_BUF_BLOCK_LIST) list_new;
 			POBJ_ZNEW(pop, &list_new, PMEM_BUF_BLOCK_LIST);	
 			plist_new = D_RW(list_new);
-			plist_new->cur_size = 0;
-			plist_new->max_size = plist->max_size;
+			plist_new->cur_pages = 0;
+			plist_new->max_pages = plist->max_pages;
 			plist_new->is_flush = false;
 		
 			//save the reference to the old list	
@@ -364,13 +368,13 @@ pm_buf_write_aio_complete(PMEMobjpool* pop, PMEM_BUF* buf, TOID(PMEM_BUF_BLOCK) 
 	TOID_ASSIGN(pblock->list, OID_NULL) ;
 	
 	POBJ_LIST_MOVE_ELEMENT_TAIL(pop, &(plist->head), &(D_RW(buf->free)->head), block, entries, entries); 
-	D_RW(buf->free)->cur_size++;
-	pmemobj_persist(pop, &D_RW(buf->free)->cur_size, sizeof( D_RW(buf->free)->cur_size));
+	D_RW(buf->free)->cur_pages++;
+	pmemobj_persist(pop, &D_RW(buf->free)->cur_pages, sizeof( D_RW(buf->free)->cur_pages));
 
-	plist->cur_size--;
-	pmemobj_persist(pop, &plist->cur_size, sizeof( plist->cur_size));
+	plist->cur_pages--;
+	pmemobj_persist(pop, &plist->cur_pages, sizeof( plist->cur_pages));
 
-	if(plist->cur_size == 0) {
+	if(plist->cur_pages == 0) {
 		//free the list
 		//plist_new->pext_list = NULL;
 		TOID_ASSIGN(plist_new->pext_list, OID_NULL);
@@ -443,5 +447,32 @@ read_page:
 		pmemobj_memcpy_persist(pop, data, pdata + pblock->pmemaddr, pblock->size); 
 		bytes_read = pblock->size;
 		return bytes_read;
+}
+///////////////////// DEBUG Funcitons /////////////////////////
+void pm_buf_print_lists_info(PMEM_BUF* buf){
+	PMEM_BUF_BLOCK_LIST* pfree;
+	PMEM_BUF_BLOCK_LIST* plist;
+	int i;
+
+	printf("PMEM_DEBUG ==================\n");
+
+	pfree = D_RW(buf->free);
+	printf("The free list: cur_pages=%zd \n", pfree->cur_pages);
+
+	printf("The buckets: \n");
+	
+	for (i = 0; i < PMEM_N_BUCKETS; i++){
+
+		plist = D_RW( D_RW(buf->buckets)[i] );
+		printf("\tBucket %d: cur_pages=%zd ", i, plist->cur_pages);
+		if ( !TOID_IS_NULL(plist->pext_list) ) {
+			
+			printf(", pext_list cur_pages=%zd ", D_RW(plist->pext_list)->cur_pages);
+		}
+		else {
+			printf("pext_list is NULL");
+		}
+		printf("\n");
+	}		
 }
 

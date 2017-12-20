@@ -80,7 +80,7 @@ struct __pmem_wrapper {
 
 /* FUNCTIONS*/
 
-PMEM_WRAPPER* pm_wrapper_create(const char* path);
+PMEM_WRAPPER* pm_wrapper_create(const char* path, const size_t pool_size);
 void pm_wrapper_free(PMEM_WRAPPER* pmw);
 
 
@@ -171,8 +171,8 @@ struct __pmem_buf_block_t{
 struct __pmem_buf_block_list_t {
 	POBJ_LIST_HEAD(block_list, PMEM_BUF_BLOCK) head;
 	TOID(PMEM_BUF_BLOCK_LIST) pext_list;
-	size_t				max_size;
-	size_t				cur_size;
+	size_t				max_pages; //max number of pages
+	size_t				cur_pages; // current buffered pages
 	bool				is_flush;
 };
 
@@ -207,7 +207,9 @@ void
 pm_buf_write_aio_complete(PMEMobjpool* pop, PMEM_BUF* buf, TOID(PMEM_BUF_BLOCK) toid_block);
 
 PMEM_BUF* pm_pop_get_buf(PMEMobjpool* pop);
+//DEBUG functions
 
+void pm_buf_print_lists_info(PMEM_BUF* buf);
 
 #define PMEM_BUF_LIST_INSERT(pop, list, entries, type, func, args) do {\
 	POBJ_LIST_INSERT_NEW_HEAD(pop, &list.head, entries, sizeof(type), func, &args); \

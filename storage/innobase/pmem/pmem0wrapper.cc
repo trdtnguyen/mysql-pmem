@@ -24,11 +24,14 @@
 //global variable
 PMEM_WRAPPER* gb_pmw = NULL;
 
+/*
+ *@param[in] path	name of file created in pmem
+ @parma[in] pool_size	size of pmemobjpool in Byte
+ * */
 
-PMEM_WRAPPER* pm_wrapper_create(const char* path){
+PMEM_WRAPPER* pm_wrapper_create(const char* path, const size_t pool_size){
 	PMEM_WRAPPER* pmw;
 	PMEMobjpool* pop = NULL;
-	size_t size;
 
 	pmw =  (PMEM_WRAPPER*) malloc(sizeof(PMEM_WRAPPER));
 	if (!pmw)
@@ -36,12 +39,12 @@ PMEM_WRAPPER* pm_wrapper_create(const char* path){
 	pmw->is_new = true;
 
 	/*create new or open existed PMEMobjpool*/
-	size =  PMEM_MAX_LOG_BUF_SIZE +
-				   (PMEM_MAX_DBW_PAGES + 1) * PMEM_PAGE_SIZE  ;
+//	size =  PMEM_MAX_LOG_BUF_SIZE +
+//				   (PMEM_MAX_DBW_PAGES + 1) * PMEM_PAGE_SIZE  ;
 
 	if (file_exists(path) != 0) {
 		if ((pop = pmemobj_create(path, POBJ_LAYOUT_NAME(my_pmemobj),
-						size, S_IWRITE | S_IREAD)) == NULL) {
+						pool_size, S_IWRITE | S_IREAD)) == NULL) {
 			printf("[PMEMOBJ_ERROR] failed to create pool\n");
 			goto err;
 		}
@@ -114,7 +117,7 @@ PMEMoid pm_pop_alloc_bytes(PMEMobjpool* pop, size_t size){
 	}
 
 	pmemobj_persist(pop, D_RW(array), size * sizeof(*D_RW(array)));
-	printf("PMEMOBJ_INFO: allocate PMEMobjpool from pmem with size %zu MB\n", (size/1024));
+	printf("PMEMOBJ_INFO: allocate PMEMobjpool from pmem with size %zu MB\n", (size/(1024*1024)));
 
 	//Check
 	char* p = (char*) pmemobj_direct(array.oid);

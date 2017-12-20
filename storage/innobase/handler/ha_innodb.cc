@@ -3697,6 +3697,12 @@ innobase_init(
 	if (!srv_pmem_home_dir) {
 		srv_pmem_home_dir = (char*) "/mnt/pmem1";
 	}
+	if (!srv_pmem_pool_size) {
+		srv_pmem_pool_size = 8 * 1024; //8 GB
+	}
+	if (!srv_pmem_buf_size) {
+		srv_pmem_buf_size = 4 * 1024 ; //4 GB
+	}
 #endif
 	if (!srv_log_group_home_dir) {
 		srv_log_group_home_dir = default_path;
@@ -19449,7 +19455,15 @@ static MYSQL_SYSVAR_BOOL(locks_unsafe_for_binlog, innobase_locks_unsafe_for_binl
 #if defined (UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_LOG) 
 static MYSQL_SYSVAR_STR(pmem_home_dir, srv_pmem_home_dir,
   PLUGIN_VAR_RQCMDARG | PLUGIN_VAR_READONLY,
-  "Path to InnoDB log files.", NULL, NULL, NULL);
+  "Path to PMEM home dir.", NULL, NULL, NULL);
+static MYSQL_SYSVAR_ULONG(pmem_pool_size, srv_pmem_pool_size,
+  PLUGIN_VAR_RQCMDARG | PLUGIN_VAR_READONLY,
+  "Path to PMEMobjpool size, from 1GB to 16GB, default 8GB.",
+  NULL, NULL, 8*1024, 1024, 16*1024,0);
+static MYSQL_SYSVAR_ULONG(pmem_buf_size, srv_pmem_buf_size,
+  PLUGIN_VAR_RQCMDARG | PLUGIN_VAR_READONLY,
+  "Path to PMEM BUFFER SIZE from 1MB to 16GB, default is 4GB.",
+  NULL, NULL, 4*1024, 1, 16*1024,0);
 #endif
 static MYSQL_SYSVAR_STR(log_group_home_dir, srv_log_group_home_dir,
   PLUGIN_VAR_RQCMDARG | PLUGIN_VAR_READONLY,
@@ -20260,6 +20274,8 @@ static struct st_mysql_sys_var* innobase_system_variables[]= {
   MYSQL_SYSVAR(log_write_ahead_size),
 #if defined (UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_LOG) 
   MYSQL_SYSVAR(pmem_home_dir),
+  MYSQL_SYSVAR(pmem_pool_size),
+  MYSQL_SYSVAR(pmem_buf_size),
 #endif
   MYSQL_SYSVAR(log_group_home_dir),
   MYSQL_SYSVAR(log_compressed_pages),

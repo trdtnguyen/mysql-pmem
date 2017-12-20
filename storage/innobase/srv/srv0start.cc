@@ -1752,9 +1752,12 @@ innobase_start_or_create_for_mysql(void)
 	#ifdef UNIV_PMEMOBJ_BUF
 		ib::info() << "======= Hello PMEMOBJ Buffer from VLDB lab ========\n";
 	#endif
+	ib::info() << "======== pool_size =" << srv_pmem_pool_size << 
+		"MB; srv_pmem_buf_size= " << srv_pmem_buf_size << "MB\n";
 //	gb_pop = pmem_create_PMEMobjpool(srv_log_group_home_dir);
 	sprintf(PMEM_FILE_PATH, "%s/%s",srv_pmem_home_dir, PMEMOBJ_FILE_NAME);
-	gb_pmw = pm_wrapper_create(PMEM_FILE_PATH);
+	size_t pool_size = srv_pmem_pool_size * 1024 * 1024;
+	gb_pmw = pm_wrapper_create(PMEM_FILE_PATH, pool_size);
 	assert(gb_pmw);
 #endif
 	srv_boot();
