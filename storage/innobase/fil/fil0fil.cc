@@ -5897,9 +5897,13 @@ fil_aio_wait(
 			TOID(PMEM_BUF_BLOCK)* block = static_cast<TOID(PMEM_BUF_BLOCK)*> (message);
 			PMEM_BUF_BLOCK* pblock = D_RW(*block);
 			if (pblock != NULL && pblock->check == PMEM_AIO_CHECK) {
-				buf_page_t* bpage = pblock->bpage;
-				buf_page_io_complete(bpage);
+				//buf_page_t* bpage = pblock->bpage;
 				pm_buf_write_aio_complete(gb_pmw->pop, gb_pmw->pbuf, *block);
+				
+				/*we do not need this call, 
+				it've ready called in buf_flush_write_block_low() 
+				right after we call pm_buf_write()*/
+				//buf_page_io_complete(bpage);
 			}
 			else {
 				buf_page_io_complete(static_cast<buf_page_t*>(message));

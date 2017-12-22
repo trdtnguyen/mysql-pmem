@@ -2337,7 +2337,18 @@ LinuxAIOHandler::resubmit(Slot* slot)
 	ut_ad(m_array->is_mutex_owned());
 
 	ut_ad(n_bytes < slot->original_len);
+#if defined(UNIV_PMEMOBJ_BUF_DEBUG)
+	//fix bugs events[i].res == -22
+	if (static_cast<ulint>(slot->n_bytes) > slot->original_len - n_bytes){
+		printf("!!!!!!!!!! PMEM_DEBUG:error slot->n_bytes=%d ", slot->n_bytes);
+		//os_file_handle_error(slot->name, "Linux aio");
+		assert(0);
+		//slot->n_bytes = 0;
+	}
+
+#else //original
 	ut_ad(static_cast<ulint>(slot->n_bytes) < slot->original_len - n_bytes);
+#endif
 	/* Partial read or write scenario */
 	ut_ad(slot->len >= static_cast<ulint>(slot->n_bytes));
 #endif /* UNIV_DEBUG */

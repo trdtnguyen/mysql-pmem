@@ -142,12 +142,14 @@ ssize_t  pm_wrapper_dbw_io(PMEM_WRAPPER* pmw,
 //modify this struct according to struct __pmem_buf_block_t
 struct list_constr_args{
 //	uint64_t		id;
-	page_id_t		id;
-	size_t			size;
-	int				check;
-	buf_page_t*		bpage;
-	TOID(PMEM_BUF_BLOCK_LIST) list;
-	uint64_t		pmemaddr;
+	page_id_t					id;
+//	size_t			size;
+	page_size_t					size;
+	int							check;
+	//buf_page_t*		bpage;
+	PMEM_BLOCK_STATE			state;
+	TOID(PMEM_BUF_BLOCK_LIST)	list;
+	uint64_t					pmemaddr;
 };
 
 /*
@@ -155,13 +157,16 @@ struct list_constr_args{
  It wrap buf_page_t and an address in pmem
  * */
 struct __pmem_buf_block_t{
+	PMEMrwlock					lock;
 	POBJ_LIST_ENTRY(PMEM_BUF_BLOCK) entries;
 //	uint64_t		id;
-	page_id_t		id;
-	size_t			size;
-	int				check;
-	buf_page_t*		bpage;
-	TOID(PMEM_BUF_BLOCK_LIST) list;
+	page_id_t					id;
+//	size_t			size;
+	page_size_t					size;
+	int							check;
+	//	buf_page_t*		bpage;
+	PMEM_BLOCK_STATE			state;
+	TOID(PMEM_BUF_BLOCK_LIST)	list;
 	uint64_t		pmemaddr; /*
 						  the offset of the page in pmem
 						  note that the size of page can be got from page
@@ -169,6 +174,7 @@ struct __pmem_buf_block_t{
 };
 
 struct __pmem_buf_block_list_t {
+	PMEMrwlock			lock;
 	POBJ_LIST_HEAD(block_list, PMEM_BUF_BLOCK) head;
 	TOID(PMEM_BUF_BLOCK_LIST) pext_list;
 	size_t				max_pages; //max number of pages
@@ -180,6 +186,7 @@ struct __pmem_buf {
 	size_t size;
 	PMEM_OBJ_TYPES type;	
 	PMEMoid  data; //pmem data
+	char* p_align; //align 
 	bool is_new;
 	TOID(PMEM_BUF_BLOCK_LIST) free;
 	TOID_ARRAY(TOID(PMEM_BUF_BLOCK_LIST)) buckets;

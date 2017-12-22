@@ -1086,7 +1086,8 @@ buf_flush_write_block_low(
 	//(2) we also don't need to write and flush pages to disk
 	//(3) just memcpy to our buffer in pmem
 	// Single write is treated similar with batch write
-	int ret = pm_buf_write(gb_pmw->pop, gb_pmw->pbuf, bpage,(void*) ((buf_block_t*) bpage)->frame);
+	// frame can be ((buf_block_t*) bpage)->frame or bpage->zip.data
+	int ret = pm_buf_write(gb_pmw->pop, gb_pmw->pbuf, bpage,(void*)frame);
 	assert(ret == PMEM_SUCCESS);
 	//After memcpy, We need this call to sync the buffer pool variables	
 	buf_page_io_complete(bpage, true);

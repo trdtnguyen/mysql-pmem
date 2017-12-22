@@ -54,6 +54,11 @@ enum PMEM_OBJ_TYPES {
 	BUF_TYPE,
 	META_DATA_TYPE
 };
+enum PMEM_BLOCK_STATE {
+    PMEM_FREE_BLOCK = 1,
+    PMEM_IN_USED_BLOCK = 2,
+    PMEM_IN_FLUSH_BLOCK=3
+};
 
 static inline int file_exists(char const *file);
 
