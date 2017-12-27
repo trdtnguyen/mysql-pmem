@@ -194,8 +194,16 @@ buf_read_page_low(
 		}
 	);
 #if defined (UNIV_PMEMOBJ_BUF)
-size_t read_bytes=  pm_buf_read(gb_pmw->pop, gb_pmw->pbuf, page_id, dst);
+	size_t read_bytes=  pm_buf_read(gb_pmw->pop, gb_pmw->pbuf, page_id, page_size, dst);
 	if (read_bytes > 0) {
+		if (sync) {
+			thd_wait_end(NULL);
+		}
+		//Since we don't use AIO in pm_buf_read, we call buf_page_io_complete() 
+		//regardless of sync value	
+		if (!buf_page_io_complete(bpage)) {
+			return(0);
+		}
 	}
 	else {
 	// if the page_id is not in pmem buffer, read it from disk as normal
@@ -231,9 +239,6 @@ size_t read_bytes=  pm_buf_read(gb_pmw->pop, gb_pmw->pbuf, page_id, dst);
 
 		ut_error;
 	}
-#if defined (UNIV_PMEMOBJ_BUF)
-}//end if
-#endif 
 	if (sync) {
 		/* The i/o is already completed when we arrive from
 		fil_read */
@@ -241,6 +246,9 @@ size_t read_bytes=  pm_buf_read(gb_pmw->pop, gb_pmw->pbuf, page_id, dst);
 			return(0);
 		}
 	}
+#if defined (UNIV_PMEMOBJ_BUF)
+	}//end if
+#endif 
 	return(1);
 }
 

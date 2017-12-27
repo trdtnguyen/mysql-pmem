@@ -72,56 +72,37 @@ PMEM_BUF* pm_pop_buf_alloc(PMEMobjpool* pop, const size_t size, const size_t pag
 } 
 
 void 
-pm_buf_list_init(PMEMobjpool* pop, PMEM_BUF* buf, const size_t list_size, const size_t page_size)
+pm_buf_list_init(PMEMobjpool* pop, PMEM_BUF* buf, const size_t total_size, const size_t page_size)
 {
 	uint64_t i;
+	uint64_t j;
+	uint64_t cur_bucket;
 	size_t offset;
+	PMEM_BUF_FREE_POOL* pfreepool;
 	PMEM_BUF_BLOCK_LIST* pfreelist;
 	PMEM_BUF_BLOCK_LIST* plist;
 	page_size_t page_size_obj(page_size, page_size, false);
 
-	size_t n_pages = (list_size / page_size);
-	size_t bucket_size = list_size / (PMEM_N_BUCKETS * PMEM_MAX_LISTS_PER_BUCKET);
-	printf("========= PMEM_INFO: n_pages = %zd bucket size = %f MB (%f %zd-KB pages) \n", n_pages, bucket_size*1.0 / (1024*1024), (bucket_size*1.0/page_size), (page_size/1024));
-	//The free list
-	POBJ_ZNEW(pop, &buf->free, PMEM_BUF_BLOCK_LIST);
-	pfreelist = D_RW(buf->free);
+	size_t n_pages = (total_size / page_size);
+	size_t bucket_size = total_size / (PMEM_N_BUCKETS * PMEM_MAX_LISTS_PER_BUCKET);
+	size_t n_pages_per_bucket = bucket_size / page_size;
 
-	pmemobj_rwlock_wrlock(pop, &pfreelist->lock);
+	size_t total_lists = total_size / bucket_size;
+	size_t n_lists_in_free_pool = total_lists - PMEM_N_BUCKETS;
 
-	pfreelist->cur_pages = 0;
-	pfreelist->max_pages = list_size / page_size;
-	pfreelist->is_flush = false;
-	//pfreelist->pext_list = NULL;
-	TOID_ASSIGN(pfreelist->pext_list, OID_NULL) ;
 
-	
+	printf("========= PMEM_INFO: n_pages = %zu bucket size = %f MB (%f %zu-KB pages) \n", n_pages, bucket_size*1.0 / (1024*1024), (bucket_size*1.0/page_size), (page_size/1024));
+
+	//Don't reset those variables during the init
 	offset = 0;
+	cur_bucket = 0;
+
+	//init the temp args struct
 	struct list_constr_args* args = (struct list_constr_args*) malloc(sizeof(struct list_constr_args)); 
-
-	for (i = 0; i < n_pages; i++) {
-		//struct list_constr_args args = {0,0,size};
-		//args->size = page_size;
-		args->size.copy_from(page_size_obj);
-		args->check = PMEM_AIO_CHECK;
-		args->state = PMEM_FREE_BLOCK;
-		//args->bpage = NULL;
-		//args->list = NULL;
-		TOID_ASSIGN(args->list, OID_NULL);
-		args->pmemaddr = offset;
-		offset += page_size;	
-
-		POBJ_LIST_INSERT_NEW_HEAD(pop, &pfreelist->head, entries, sizeof(PMEM_BUF_BLOCK), pm_buf_block_init, args); 
-		pfreelist->cur_pages++;
-	}
-	free(args);
-
-	pmemobj_persist(pop, &pfreelist->cur_pages, sizeof(pfreelist->cur_pages) );
-	pmemobj_persist(pop, &pfreelist->max_pages, sizeof(pfreelist->max_pages) );
-	pmemobj_persist(pop, &pfreelist->is_flush, sizeof(pfreelist->is_flush) );
-	pmemobj_persist(pop, &pfreelist->pext_list, sizeof(pfreelist->pext_list) );
-
-	pmemobj_rwlock_unlock(pop, &pfreelist->lock);
+	args->size.copy_from(page_size_obj);
+	args->check = PMEM_AIO_CHECK;
+	args->state = PMEM_FREE_BLOCK;
+	TOID_ASSIGN(args->list, OID_NULL);
 
 	//The buckets
 	//The sub-buf lists
@@ -133,7 +114,9 @@ pm_buf_list_init(PMEMobjpool* pop, PMEM_BUF* buf, const size_t list_size, const 
 	if (TOID_IS_NULL(buf->buckets) ){
 		fprintf(stderr, "POBJ_ALLOC\n");
 	}
+
 	for(i = 0; i < PMEM_N_BUCKETS; i++) {
+		//init the bucket 
 		POBJ_ZNEW(pop, &D_RW(buf->buckets)[i], PMEM_BUF_BLOCK_LIST);	
 		if(TOID_IS_NULL(D_RW(buf->buckets)[i])) {
 			fprintf(stderr, "POBJ_ZNEW\n");
@@ -146,18 +129,95 @@ pm_buf_list_init(PMEMobjpool* pop, PMEM_BUF* buf, const size_t list_size, const 
 		plist->cur_pages = 0;
 		plist->max_pages = bucket_size / page_size;
 		plist->is_flush = false;
+		plist->n_pending = 0;
+		plist->list_id = cur_bucket;
+		cur_bucket++;
+		plist->check = PMEM_AIO_CHECK;
 		//plist->pext_list = NULL;
-		TOID_ASSIGN(plist->pext_list, OID_NULL);
+		//TOID_ASSIGN(plist->pext_list, OID_NULL);
+	
+		//init pages in bucket
+		for (j = 0; j < n_pages_per_bucket; j++) {
+			args->pmemaddr = offset;
+			TOID_ASSIGN(args->list, (D_RW(buf->buckets)[i]).oid);
+			offset += page_size;	
+
+			POBJ_LIST_INSERT_NEW_HEAD(pop, &plist->head, entries, sizeof(PMEM_BUF_BLOCK), pm_buf_block_init, args); 
+			//plist->cur_pages++;
+		}
+		TOID_ASSIGN(plist->next_free_block, POBJ_LIST_FIRST(&plist->head).oid);
 
 		pmemobj_persist(pop, &plist->cur_pages, sizeof(plist->cur_pages));
 		pmemobj_persist(pop, &plist->max_pages, sizeof(plist->max_pages));
 		pmemobj_persist(pop, &plist->is_flush, sizeof(plist->is_flush));
-		pmemobj_persist(pop, &plist->pext_list, sizeof(plist->pext_list));
+		//pmemobj_persist(pop, &plist->pext_list, sizeof(plist->pext_list));
+		pmemobj_persist(pop, &plist->n_pending, sizeof(plist->n_pending));
+		pmemobj_persist(pop, &plist->check, sizeof(plist->check));
+		pmemobj_persist(pop, &plist->list_id, sizeof(plist->list_id));
+		pmemobj_persist(pop, &plist->next_free_block, sizeof(plist->next_free_block));
 		pmemobj_persist(pop, plist, sizeof(*plist));
 
 		pmemobj_rwlock_unlock(pop, &plist->lock);
 	}
 
+	//The free pool
+	POBJ_ZNEW(pop, &buf->free_pool, PMEM_BUF_FREE_POOL);	
+	if(TOID_IS_NULL(buf->free_pool)) {
+		fprintf(stderr, "POBJ_ZNEW\n");
+		assert(0);
+	}
+	pfreepool = D_RW(buf->free_pool);
+	pfreepool->cur_lists = 0;
+	
+	for(i = 0; i < n_lists_in_free_pool; i++) {
+		//init the bucket 
+		TOID(PMEM_BUF_BLOCK_LIST) freelist;
+		POBJ_ZNEW(pop, &freelist, PMEM_BUF_BLOCK_LIST);	
+		if(TOID_IS_NULL(freelist)) {
+			fprintf(stderr, "POBJ_ZNEW\n");
+			assert(0);
+		}
+		pfreelist = D_RW(freelist);
+
+		pmemobj_rwlock_wrlock(pop, &pfreelist->lock);
+
+		pfreelist->cur_pages = 0;
+		pfreelist->max_pages = bucket_size / page_size;
+		pfreelist->is_flush = false;
+		pfreelist->n_pending = 0;
+		pfreelist->list_id = cur_bucket;
+		cur_bucket++;
+		pfreelist->check = PMEM_AIO_CHECK;
+	
+		//init pages in bucket
+		for (j = 0; j < n_pages_per_bucket; j++) {
+			args->pmemaddr = offset;
+			offset += page_size;	
+			TOID_ASSIGN(args->list, freelist.oid);
+
+			POBJ_LIST_INSERT_NEW_HEAD(pop, &pfreelist->head, entries, sizeof(PMEM_BUF_BLOCK), pm_buf_block_init, args); 
+			//pfreelist->cur_pages++;
+		}
+		TOID_ASSIGN(pfreelist->next_free_block, POBJ_LIST_FIRST(&pfreelist->head).oid);
+
+		pmemobj_persist(pop, &pfreelist->cur_pages, sizeof(pfreelist->cur_pages));
+		pmemobj_persist(pop, &pfreelist->max_pages, sizeof(pfreelist->max_pages));
+		pmemobj_persist(pop, &pfreelist->is_flush, sizeof(pfreelist->is_flush));
+		//pmemobj_persist(pop, &pfreelist->pext_list, sizeof(pfreelist->pext_list));
+		pmemobj_persist(pop, &pfreelist->n_pending, sizeof(pfreelist->n_pending));
+		pmemobj_persist(pop, &pfreelist->check, sizeof(pfreelist->check));
+		pmemobj_persist(pop, &pfreelist->list_id, sizeof(pfreelist->list_id));
+		pmemobj_persist(pop, &pfreelist->next_free_block, sizeof(pfreelist->next_free_block));
+		pmemobj_persist(pop, pfreelist, sizeof(*plist));
+
+		pmemobj_rwlock_unlock(pop, &pfreelist->lock);
+
+		//insert this list in the freepool
+		POBJ_LIST_INSERT_HEAD(pop, &pfreepool->head, freelist, list_entries);
+		pfreepool->cur_lists++;
+		//loop: init next buckes
+	} //end init the freepool
+	pmemobj_persist(pop, &buf->free_pool, sizeof(buf->free_pool));
 }
 
 /*This function is called as the func pointer in POBJ_LIST_INSERT_NEW_HEAD()*/
@@ -173,7 +233,6 @@ pm_buf_block_init(PMEMobjpool *pop, void *ptr, void *arg){
 	block->state = args->state;
 	//block->bpage = args->bpage;
 	TOID_ASSIGN(block->list, (args->list).oid);
-	//block->list = args->list;
 	block->pmemaddr = args->pmemaddr;
 
 	pmemobj_persist(pop, &block->id, sizeof(block->id));
@@ -216,7 +275,8 @@ PMEM_BUF* pm_pop_get_buf(PMEMobjpool* pop) {
 int
 pm_buf_write(PMEMobjpool* pop, PMEM_BUF* buf, buf_page_t* bpage, void* src_data){
 	ulint hashed;
-	PMEM_BUF_BLOCK_LIST* plist;
+	TOID(PMEM_BUF_BLOCK_LIST) hash_list;
+	PMEM_BUF_BLOCK_LIST* phashlist;
 	PMEM_BUF_BLOCK_LIST* plist_new;
 	PMEM_BUF_BLOCK_LIST* pfree;
 
@@ -226,113 +286,115 @@ pm_buf_write(PMEMobjpool* pop, PMEM_BUF* buf, buf_page_t* bpage, void* src_data)
 	char* pdata;
 	//page_id_t page_id;
 	size_t page_size;
+	size_t check;
 
 	//Does some checks 
 	assert(buf);
 	assert(src_data);
-	UNIV_MEM_ASSERT_RW(src_data, page_size);
 	assert(bpage);
 	//we need to ensure we are writting a page in buffer pool
 	ut_a(buf_page_in_file(bpage));
+	ut_ad(!buf_page_get_mutex(bpage)->is_owned());
+	ut_ad(buf_page_get_io_fix(bpage) == BUF_IO_WRITE);
 
-	//page_id.copy_from(bpage->id);
 	page_size = bpage->size.physical();
+	UNIV_MEM_ASSERT_RW(src_data, page_size);
 
 	PMEM_HASH_KEY(hashed, bpage->id.fold(), PMEM_N_BUCKETS);
+retry:
 	//plist = &(buf->bufs[hashed]);
-	plist = D_RW( D_RW(buf->buckets)[hashed]);
-	assert(plist);
+	TOID_ASSIGN(hash_list, (D_RW(buf->buckets)[hashed]).oid);
+	phashlist = D_RW(hash_list);
+	assert(phashlist);
 
-	//search in the hashed list, we will not lock the hashed list 
-	pblock = NULL;
-	POBJ_LIST_FOREACH(iter, &plist->head, entries) {
-		if ( D_RW(iter)->id.equals_to(bpage->id)) {
-			pblock = D_RW(iter);
-			//assert(pblock->size == page_size);
-			assert(pblock->size.equals_to(bpage->size));
-			break; // found the exist page
-		}
+	if (phashlist->is_flush) {
+		os_thread_sleep(PMEM_WAIT_FOR_WRITE);
+
+#if defined(UNIV_PMEMOBJ_BUF_DEBUG)
+	printf("\n\n    PMEM_DEBUG: in pmem_buf_write, the hash_list id %zu is flusing, wait and retry\n ", phashlist->list_id);
+#endif	
+		goto retry;
+
 	}
-	
-	//pdata = static_cast<char*>( pmemobj_direct(buf->data));
+	assert(!phashlist->is_flush);
+
+#if defined(UNIV_PMEMOBJ_BUF_DEBUG)
+	//printf("========   PMEM_DEBUG: in pmem_buf_write, the write page_id %zu space %zu hash_list id %zu \n ", bpage->id.page_no(), bpage->id.space(), phashlist->list_id);
+#endif	
 	pdata = buf->p_align;
 
+	//search in the hashed list, we will not lock the hashed list 
+	//pblock = NULL;
+	TOID_ASSIGN(iter, phashlist->next_free_block.oid);
 
-	if (pblock == NULL) {
-		//this page_id is not exist in the pmem buffer, write it
-		pfree = D_RW(buf->free);
-		//[lock] the free list
-		pmemobj_rwlock_wrlock(pop, &pfree->lock);
+	check = 0;
+	while ( !TOID_IS_NULL(iter)) {
+		pblock = D_RW(iter);
+		//Note: in this impelementation, we allow multiple versions of a page_id exist
 
-		//Get a non-block free block from the free list
-
-		free_block = POBJ_LIST_FIRST(&pfree->head);
-		if (TOID_IS_NULL(free_block)) {
-			printf("PMEM_INFO: there is no free block in pmem buffer\n");
-			//[TODO] wait from some seconds or extend the buffer
-#if defined(UNIV_PMEMOBJ_BUF_DEBUG)
-			pm_buf_print_lists_info(buf);
-#endif
-			//we should replace the return error to wait in some ms
-			return PMEM_ERROR;
+		if(pblock && pblock->state == PMEM_FREE_BLOCK){
+			//we only get the un-locked block 
+			if ( pmemobj_rwlock_trywrlock(pop, &pblock->lock) == 0) {
+				assert(pblock->size.equals_to(bpage->size));
+				TOID_ASSIGN(free_block, iter.oid);
+				break;
+			}
 		}
-		
-		D_RW(free_block)->id.copy_from(bpage->id);
-		//be careful with this assert
-		if (!D_RW(free_block)->size.equals_to(bpage->size)) {
-			printf ("!!!!!!!!! PMEM_DEBUG:check this, free_block->size is not equal to bpage->size, but we asign bpage->size\n");
-			D_RW(free_block)->size.copy_from(bpage->size);
-		}
-		//save the reference to bpage 
-		//D_RW(free_block)->bpage=  bpage; 
-		D_RW(free_block)->state = PMEM_IN_USED_BLOCK;
-
-		pmemobj_memcpy_persist(pop, pdata + D_RW(free_block)->pmemaddr, src_data, page_size); 
-		//lock the hashed list
-		pmemobj_rwlock_wrlock(pop, &plist->lock);
-
-		//move the block from the free list to the buf list
-		POBJ_LIST_MOVE_ELEMENT_TAIL(pop, &pfree->head, &plist->head, free_block, entries, entries);
-		D_RW(buf->free)->cur_pages--;
-		plist->cur_pages++;
-#if defined(UNIV_PMEMOBJ_BUF_DEBUG)
-		printf("PMEM_DEBUG:  in pm_buf_write(), freelist: cur_pages %zd \n", D_RW(buf->free)->cur_pages);
-#endif
-	    //unlock the free list
-		pmemobj_rwlock_unlock(pop, &pfree->lock);
-
-		//If the current buf is nearly full, flush pages to disk
-		if (plist->cur_pages >= plist->max_pages * PMEM_BUF_THRESHOLD) {
-			plist->is_flush = true;
-			//Allocate a new list
-			TOID(PMEM_BUF_BLOCK_LIST) list_new;
-			POBJ_ZNEW(pop, &list_new, PMEM_BUF_BLOCK_LIST);	
-			plist_new = D_RW(list_new);
-			plist_new->cur_pages = 0;
-			plist_new->max_pages = plist->max_pages;
-			plist_new->is_flush = false;
-		
-			//save the reference to the old list	
-			//plist_new->pext_list = buf->buckets[hashed];
-			TOID_ASSIGN(plist_new->pext_list, (D_RW(buf->buckets)[hashed]).oid);
-
-			//buf->buckets[hashed] = &list_new;
-			TOID_ASSIGN(D_RW(buf->buckets)[hashed], list_new.oid);
-				
-			pmemobj_rwlock_unlock(pop, &plist->lock);
-			//flush the plist async
-			pm_buf_write_list_to_datafile(pop, buf, list_new, plist);
-		}
-		else {
-			//unlock the hashed list
-			pmemobj_rwlock_unlock(pop, &plist->lock);
+		iter = POBJ_LIST_NEXT(iter, entries);
+		check++;
+		if (check > phashlist->max_pages) {
+			printf("!!!!PMEM_ERROR Something are wrong in pmem_buf_write\n");
+			assert(0);
 		}
 	}
+	check = 0;
+
+	if ( TOID_IS_NULL(iter) ) {
+		//ALl blocks in this hash_list are either non-fre or locked
+		//This is rarely happen but we still deal with it
+		os_thread_sleep(PMEM_WAIT_FOR_WRITE);
+#if defined(UNIV_PMEMOBJ_BUF_DEBUG)
+	printf("\n\n    PMEM_DEBUG: in pmem_buf_write,  hash_list id %zu no free or non-block pages retry \n ", phashlist->list_id);
+#endif	
+		goto retry;
+	}
+	// At this point, we get the free and un-blocked block, write data to this block
+	D_RW(free_block)->id.copy_from(bpage->id);
+	assert(D_RW(free_block)->size.equals_to(bpage->size));
+	D_RW(free_block)->state = PMEM_IN_USED_BLOCK;
+	pmemobj_memcpy_persist(pop, pdata + D_RW(free_block)->pmemaddr, src_data, page_size); 
+	pmemobj_rwlock_unlock(pop, &D_RW(free_block)->lock);
+
+	//handle hash_list, 
+	pmemobj_rwlock_wrlock(pop, &D_RW(hash_list)->lock);
+
+	TOID_ASSIGN(phashlist->next_free_block, free_block.oid);
+	phashlist->cur_pages++;
+	if (phashlist->cur_pages >= phashlist->max_pages * PMEM_BUF_THRESHOLD) {
+		//The hashlist is nearly full, flush it and assign a free list 
+		phashlist->is_flush = true;
+
+		//Get a free list from the free pool
+		pmemobj_rwlock_wrlock(pop, &(D_RW(buf->free_pool)->lock));
+
+		//TOID(PMEM_BUF_BLOCK_LIST) list_new;
+		TOID(PMEM_BUF_BLOCK_LIST) first_list = POBJ_LIST_FIRST (&(D_RW(buf->free_pool)->head));
+		POBJ_LIST_REMOVE(pop, &D_RW(buf->free_pool)->head, first_list, list_entries);
+		D_RW(buf->free_pool)->cur_lists--;
+
+		pmemobj_rwlock_unlock(pop, &(D_RW(buf->free_pool)->lock));
+		
+		//Asign current hash list to new list
+		TOID_ASSIGN(D_RW(buf->buckets)[hashed], first_list.oid);
+
+		D_RW(hash_list)->n_pending = D_RW(hash_list)->cur_pages;
+		pmemobj_rwlock_unlock(pop, &D_RW(hash_list)->lock);
+
+		pm_buf_write_list_to_datafile(pop, buf, hash_list);
+	}
 	else {
-		//Overwrite the exist page
-		pmemobj_rwlock_wrlock(pop, &pblock->lock);
-		pmemobj_memcpy_persist(pop, pdata + pblock->pmemaddr, src_data, page_size); 
-		pmemobj_rwlock_unlock(pop, &pblock->lock);
+		//unlock the hashed list
+		pmemobj_rwlock_unlock(pop, &D_RW(hash_list)->lock);
 	}
 
 	return PMEM_SUCCESS;
@@ -340,18 +402,23 @@ pm_buf_write(PMEMobjpool* pop, PMEM_BUF* buf, buf_page_t* bpage, void* src_data)
 
 /*
  * Async write pages from the list to datafile
+ * The caller thread need to lock/unlock the plist
  * See buf_dblwr_write_block_to_datafile
  *	@param[in] pop		PMEMobjpool pointer
  *	@param[in] buf		PMEM_BUF pointer
  *	@param[in] plist_new	pointer to the list that plist_new->pext is the list need to be written 
  * */
 void
-pm_buf_write_list_to_datafile(PMEMobjpool* pop, PMEM_BUF* buf, TOID(PMEM_BUF_BLOCK_LIST) list_new, PMEM_BUF_BLOCK_LIST* plist) {
+//pm_buf_write_list_to_datafile(PMEMobjpool* pop, PMEM_BUF* buf, TOID(PMEM_BUF_BLOCK_LIST) list_new, PMEM_BUF_BLOCK_LIST* plist) {
+pm_buf_write_list_to_datafile(PMEMobjpool* pop, PMEM_BUF* buf, TOID(PMEM_BUF_BLOCK_LIST)flush_list) {
+
+	PMEM_BUF_BLOCK_LIST* plist;
 
 	TOID(PMEM_BUF_BLOCK) iter;
 	TOID(PMEM_BUF_BLOCK)* piter;
-	TOID(PMEM_BUF_BLOCK) free_block;
+	TOID(PMEM_BUF_BLOCK) flush_block;
 	PMEM_BUF_BLOCK* pblock;
+	size_t n_flush;
 	//buf_page_t* bpage;
 
 	ulint type = IORequest::WRITE;
@@ -360,34 +427,59 @@ pm_buf_write_list_to_datafile(PMEMobjpool* pop, PMEM_BUF* buf, TOID(PMEM_BUF_BLO
 	char* pdata;
 	assert(pop);
 	assert(buf);
-	assert(!TOID_IS_NULL(list_new));
-	
+	//assert(!TOID_IS_NULL(list_new));
+
+#if defined(UNIV_PMEMOBJ_BUF_DEBUG)
+	printf("\n\n    PMEM_DEBUG: pm_buf_write_list_to_datafile()\n ");
+#endif	
+	plist = D_RW(flush_list);
+
 	//pdata = static_cast<char*>( pmemobj_direct(buf->data));
 	pdata = buf->p_align;
+	//D_RW(flush_list)->n_pending = D_RW(flush_list)->cur_pages;
+
+	//We don't lock the flush_list here, that prevent AIO complete thread access to the flush_list
 	
-	//for each block on the old list
-	POBJ_LIST_FOREACH(iter, &plist->head, entries) {
-			piter = &iter;
-			pblock = D_RW(iter);
-			if (pblock->state == PMEM_IN_FLUSH_BLOCK)
-				continue;
-			//save the reference to the plist_new
-			//pblock->list = list_new;
-			TOID_ASSIGN(pblock->list,  list_new.oid);
-			pblock->state = PMEM_IN_FLUSH_BLOCK;	
-			//We write from our pmem buf to disk
-			assert( pblock->pmemaddr < buf->size);
-			UNIV_MEM_ASSERT_RW(pdata + pblock->pmemaddr, page_size);
+	n_flush = 0;
 
-			dberr_t err = fil_io(request, 
-					false, pblock->id, pblock->size, 0, pblock->size.physical(),
-					pdata + pblock->pmemaddr, piter);
+	POBJ_LIST_FOREACH(flush_block, &D_RW(flush_list)->head, entries) {
+		pblock = D_RW(flush_block);
+		//PMEM_BUF_BLOCK* pt = D_RW(iter);
+		//Becareful with this assert
+		//assert (pblock->state == PMEM_IN_USED_BLOCK);
+		if (pblock->state == PMEM_FREE_BLOCK) {
+			printf("!!!!!PMEM_WARNING: don't write a FREE BLOCK, skip to next block\n");
+			continue;
+		}
+		pmemobj_rwlock_wrlock(pop, &pblock->lock);
+		
+		assert( pblock->pmemaddr < buf->size);
+		UNIV_MEM_ASSERT_RW(pdata + pblock->pmemaddr, page_size);
+#if defined(UNIV_PMEMOBJ_BUF_DEBUG)
+	//	printf("PMEM_DEBUG: aio request page_id %zu space %zu pmemaddr %zu flush_list id=%zu\n", pblock->id.page_no(), pblock->id.space(), pblock->pmemaddr, plist->list_id);
+#endif
+			
+		pblock->state = PMEM_FREE_BLOCK;	
+		//We did it in init instead
+		//TOID_ASSIGN(pblock->list, flush_list.oid);
+		dberr_t err = fil_io(request, 
+				false, pblock->id, pblock->size, 0, pblock->size.physical(),
+				pdata + pblock->pmemaddr, pblock);
 
-			if (err != DB_SUCCESS){
-				printf("PMEM_ERROR: fil_io() in pm_buf_list_write_to_datafile()\n ");
-				assert(0);
-			}
+		n_flush++;
+		if (err != DB_SUCCESS){
+			printf("PMEM_ERROR: fil_io() in pm_buf_list_write_to_datafile()\n ");
+			assert(0);
+		}
+		pmemobj_rwlock_unlock(pop, &pblock->lock);
+
+		if(n_flush >= D_RW(flush_list)->cur_pages)
+			break;
 	}
+	assert(n_flush == D_RW(flush_list)->cur_pages);
+	//The aio complete thread will handle the post-processing of the flush list
+	printf("\n\n    End PMEM_DEBUG: pm_buf_write_list_to_datafile()\n ");
+	//pm_buf_print_lists_info(buf);
 }
 
 /*
@@ -396,9 +488,15 @@ pm_buf_write_list_to_datafile(PMEMobjpool* pop, PMEM_BUF* buf, TOID(PMEM_BUF_BLO
  *	@param[in] buf		PMEM_BUF pointer
  *	@param[in] pblock	pointer to the completed block
  * */
+/*
 void
-pm_buf_write_aio_complete(PMEMobjpool* pop, PMEM_BUF* buf, TOID(PMEM_BUF_BLOCK) toid_block) {
+pm_buf_write_aio_complete(PMEMobjpool* pop, PMEM_BUF* buf, TOID(PMEM_BUF_BLOCK)* ptoid_block) {
+//pm_buf_write_aio_complete(PMEMobjpool* pop, PMEM_BUF* buf, TOID(PMEM_BUF_BLOCK) toid_block) {
 
+//pm_buf_write_aio_complete(PMEMobjpool* pop, PMEM_BUF* buf, PMEMoid* poid) {
+#if defined (UNIV_PMEMOBJ_BUF_DEBUG)
+	printf("==== AIO ==== \nPMEM_DEBUG: pm_buf_write_aio_complete\n");
+#endif
 	PMEM_BUF_BLOCK_LIST* plist_new;
 	PMEM_BUF_BLOCK_LIST* plist;
 	PMEM_BUF_BLOCK_LIST* pfreelist;
@@ -408,12 +506,19 @@ pm_buf_write_aio_complete(PMEMobjpool* pop, PMEM_BUF* buf, TOID(PMEM_BUF_BLOCK) 
 
 	assert(pop);
 	assert(buf);
-	assert(!TOID_IS_NULL(toid_block));
+	assert(ptoid_block);
+	//assert(!TOID_IS_NULL(toid_block));
+	//assert(poid);
 	
-//	block = *(ptoid_block);
-	TOID_ASSIGN(block,  toid_block.oid);
+	block = *(ptoid_block);
+	assert(!TOID_IS_NULL(block));
+
+	//TOID_ASSIGN(block,  toid_block.oid);
+	//TOID_ASSIGN(block,  toid_block.oid);
+	//TOID_ASSIGN(block,  *poid);
 
 	pblock = D_RW(block);
+	assert(pblock);
 	plist_new = D_RW(pblock->list);
 	assert(plist_new);
 	
@@ -423,23 +528,23 @@ pm_buf_write_aio_complete(PMEMobjpool* pop, PMEM_BUF* buf, TOID(PMEM_BUF_BLOCK) 
 	assert(plist);
 	
 	pfreelist = D_RW(buf->free);
-
-	pmemobj_rwlock_wrlock(pop, &pfreelist->lock);
+	//remove block from the plist
 	pmemobj_rwlock_wrlock(pop, &plist->lock);
-
-
-	pmemobj_rwlock_wrlock(pop, &pblock->lock);
-	//move the block to the free list (re-use)
-	//pblock->bpage = NULL;
-	TOID_ASSIGN(pblock->list, OID_NULL) ;
-	pblock->state=PMEM_FREE_BLOCK;
-	
-	POBJ_LIST_MOVE_ELEMENT_TAIL(pop, &(plist->head), &(D_RW(buf->free)->head), block, entries, entries); 
-	D_RW(buf->free)->cur_pages++;
-	pmemobj_persist(pop, &D_RW(buf->free)->cur_pages, sizeof( D_RW(buf->free)->cur_pages));
-
+	POBJ_LIST_REMOVE(pop, &plist->head, block, entries);
 	plist->cur_pages--;
 	pmemobj_persist(pop, &plist->cur_pages, sizeof( plist->cur_pages));
+	pmemobj_rwlock_unlock(pop, &plist->lock);
+
+	//Reset the removed block
+	pmemobj_rwlock_wrlock(pop, &pblock->lock);
+	TOID_ASSIGN(pblock->list, OID_NULL) ;
+	pblock->state=PMEM_FREE_BLOCK;
+
+	//insert the removed block to the free list
+	pmemobj_rwlock_wrlock(pop, &pfreelist->lock);
+	POBJ_LIST_INSERT_TAIL(pop, &(D_RW(buf->free)->head), block, entries);
+	D_RW(buf->free)->cur_pages++;
+	pmemobj_persist(pop, &D_RW(buf->free)->cur_pages, sizeof( D_RW(buf->free)->cur_pages));
 
 	pmemobj_rwlock_unlock(pop, &pfreelist->lock);
 	pmemobj_rwlock_unlock(pop, &pblock->lock);
@@ -452,10 +557,14 @@ pm_buf_write_aio_complete(PMEMobjpool* pop, PMEM_BUF* buf, TOID(PMEM_BUF_BLOCK) 
 		POBJ_FREE(&list);
 	}	
 	else {
-		pmemobj_rwlock_unlock(pop, &plist->lock);
+		//do nothing
+	//	pmemobj_rwlock_unlock(pop, &plist->lock);
 	}
+#if defined(UNIV_PMEMOBJ_BUF_DEBUG)
+			printf("PMEM_DEBUG: aio complete page_id %zd pmemaddr %zd \n", pblock->id.page_no(), pblock->pmemaddr);
+#endif
 }
-
+*/
 
 /*
  *	Read a page from pmem buffer using the page_id as key
@@ -466,7 +575,7 @@ pm_buf_write_aio_complete(PMEMobjpool* pop, PMEM_BUF* buf, TOID(PMEM_BUF_BLOCK) 
  *  @return:  size of read page
  * */
 size_t 
-pm_buf_read(PMEMobjpool* pop, PMEM_BUF* buf, page_id_t page_id, void* data) {
+pm_buf_read(PMEMobjpool* pop, PMEM_BUF* buf, const page_id_t page_id, const page_size_t size, void* data) {
 	
 	ulint hashed;
 	PMEM_BUF_BLOCK_LIST* plist;
@@ -475,6 +584,7 @@ pm_buf_read(PMEMobjpool* pop, PMEM_BUF* buf, page_id_t page_id, void* data) {
 	PMEM_BUF_BLOCK* pblock;
 	char* pdata;
 	size_t bytes_read;
+	size_t check;
 
 	
 	assert(buf);
@@ -486,20 +596,36 @@ pm_buf_read(PMEMobjpool* pop, PMEM_BUF* buf, page_id_t page_id, void* data) {
 	assert(plist);
 
 	pblock = NULL;
-	POBJ_LIST_FOREACH(iter, &plist->head, entries) {
-		if ( D_RW(iter)->id.equals_to(page_id)) {
+
+	//We scan from the tail of the hash_list so that the read page (if any) is the lastest version
+	TOID_ASSIGN(iter, plist->next_free_block.oid);
+	TOID(PMEM_BUF_BLOCK) first = POBJ_LIST_FIRST(&plist->head);
+
+	check = 0;
+
+	while ( !TOID_IS_NULL(iter)) {
+
+		if ( D_RW(iter)->state != PMEM_FREE_BLOCK &&
+				D_RW(iter)->id.equals_to(page_id)) {
 			pblock = D_RW(iter);
-			//assert(pblock->size == page_size);
+			assert(pblock->size.equals_to(size));
 			break; // found the exist page
 		}
+		if ( TOID_EQUALS(iter, first) ) {
+			break;
+		}
+		check++;
+		if (check >= plist->max_pages + 10) {
+			printf("PMEM_ERROR pm_buf_read has some problems\n");
+			assert(0);
+		}
+		iter = POBJ_LIST_PREV(iter, entries);
 	}
-	
-	//pdata = static_cast<char*>( pmemobj_direct(buf->data));
-	pdata = buf->p_align;
-
+		
 	if (pblock == NULL) {
 		//page is not in this hashed list
 		//Try to read the extend list
+/*
 		if( !TOID_IS_NULL(plist->pext_list)) {
 			plist = D_RW(plist->pext_list);
 			POBJ_LIST_FOREACH(iter, &plist->head, entries) {
@@ -513,44 +639,43 @@ pm_buf_read(PMEMobjpool* pop, PMEM_BUF* buf, page_id_t page_id, void* data) {
 				goto read_page;
 			}
 		}
+*/
 		// page is not exist
 		return 0;
 	}
 read_page:
-		//page exist in the list or the extend list, read page
-		pmemobj_rwlock_rdlock(pop, &pblock->lock); 
-		
-		UNIV_MEM_ASSERT_RW(data, pblock->size.physical());
-		pmemobj_memcpy_persist(pop, data, pdata + pblock->pmemaddr, pblock->size.physical()); 
-		bytes_read = pblock->size.physical();
+	//pdata = static_cast<char*>( pmemobj_direct(buf->data));
+#if defined(UNIV_PMEMOBJ_BUF_DEBUG)
+//		printf("PMEM_DEBUG: pm_buf_read from pmem page_id %zu space = %zu pmemaddr= %zu flush_list id=%zu\n", page_id.page_no(), page_id.space(), pblock->pmemaddr, plist->list_id);
+#endif
+	pdata = buf->p_align;
+	//page exist in the list or the extend list, read page
+	pmemobj_rwlock_rdlock(pop, &pblock->lock); 
 
-		pmemobj_rwlock_unlock(pop, &pblock->lock); 
-		return bytes_read;
+	UNIV_MEM_ASSERT_RW(data, pblock->size.physical());
+	pmemobj_memcpy_persist(pop, data, pdata + pblock->pmemaddr, pblock->size.physical()); 
+	bytes_read = pblock->size.physical();
+
+	pmemobj_rwlock_unlock(pop, &pblock->lock); 
+	return bytes_read;
 }
 ///////////////////// DEBUG Funcitons /////////////////////////
 void pm_buf_print_lists_info(PMEM_BUF* buf){
-	PMEM_BUF_BLOCK_LIST* pfree;
+	PMEM_BUF_FREE_POOL* pfreepool;
 	PMEM_BUF_BLOCK_LIST* plist;
 	int i;
 
 	printf("PMEM_DEBUG ==================\n");
 
-	pfree = D_RW(buf->free);
-	printf("The free list: cur_pages=%zd \n", pfree->cur_pages);
+	pfreepool = D_RW(buf->free_pool);
+	printf("The free pool: curlists=%zd \n", pfreepool->cur_lists);
 
 	printf("The buckets: \n");
 	
 	for (i = 0; i < PMEM_N_BUCKETS; i++){
 
 		plist = D_RW( D_RW(buf->buckets)[i] );
-		printf("\tBucket %d: cur_pages=%zd ", i, plist->cur_pages);
-		if ( !TOID_IS_NULL(plist->pext_list) ) {
-			
-			printf(", pext_list cur_pages=%zd ", D_RW(plist->pext_list)->cur_pages);
-		}
-		else {
-			printf("pext_list is NULL");
-		}
+		printf("\tBucket %d: list_id=%zu cur_pages=%zd ", i, plist->list_id, plist->cur_pages);
 		printf("\n");
 	}		
 }

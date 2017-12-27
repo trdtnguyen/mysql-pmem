@@ -4194,9 +4194,12 @@ loop:
 		}
 
 		if (buf_read_page(page_id, page_size)) {
+#if defined(UNIV_PMEMOBJ_BUF)
+			//for pmem buf, we don't need to read-ahead
+#else //original
 			buf_read_ahead_random(page_id, page_size,
 					      ibuf_inside(mtr));
-
+#endif /* UNIV_PMEMOBJ_BUF */
 			retries = 0;
 		} else if (retries < BUF_PAGE_READ_MAX_RETRIES) {
 			++retries;

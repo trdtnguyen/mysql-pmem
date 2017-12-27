@@ -5894,16 +5894,50 @@ fil_aio_wait(
 		access to the page */
 		if (message != NULL) {
 #if defined (UNIV_PMEMOBJ_BUF)
-			TOID(PMEM_BUF_BLOCK)* block = static_cast<TOID(PMEM_BUF_BLOCK)*> (message);
-			PMEM_BUF_BLOCK* pblock = D_RW(*block);
+			PMEM_BUF_BLOCK* pblock = static_cast<PMEM_BUF_BLOCK*> (message);
 			if (pblock != NULL && pblock->check == PMEM_AIO_CHECK) {
+				//This AIO is called from pmem implementation
 				//buf_page_t* bpage = pblock->bpage;
-				pm_buf_write_aio_complete(gb_pmw->pop, gb_pmw->pbuf, *block);
+				//pm_buf_write_aio_complete(gb_pmw->pop, gb_pmw->pbuf, ptoid_block);
+				TOID(PMEM_BUF_BLOCK_LIST) flush_list;
+				TOID_ASSIGN(flush_list, pblock->list.oid);
+				PMEM_BUF_BLOCK_LIST* pflush_list = D_RW(flush_list);
+#if defined (UNIV_PMEMOBJ_BUF_DEBUG)
+				//printf("PMEM_DEBUG: in fil_aio_wait(), finish a page id %zd space %zd in list %zd \n", pblock->id.page_no(), pblock->id.space(), pflush_list->list_id); 
+#endif	
+				//pmemobj_rwlock_wrlock(gb_pmw->pop, &pblock->lock);
+				//pblock->state = PMEM_FREE_BLOCK;
+				//pmemobj_rwlock_unlock(gb_pmw->pop, &pblock->lock);
+
+				pmemobj_rwlock_wrlock(gb_pmw->pop, &pflush_list->lock);
+				pflush_list->n_pending--;
+				if (pflush_list->n_pending == 0) {
+					//reset the list
+					
+					pflush_list->cur_pages = 0;
+					pflush_list->is_flush = false;
+					TOID_ASSIGN(pflush_list->next_free_block, POBJ_LIST_FIRST(&pflush_list->head).oid);
+					pmemobj_rwlock_unlock(gb_pmw->pop, &pflush_list->lock);
+
+					//we return this list to the free_pool
+					TOID(PMEM_BUF_FREE_POOL) free_pool;
+					TOID_ASSIGN(free_pool, gb_pmw->pbuf->free_pool.oid);
+
+					pmemobj_rwlock_wrlock(gb_pmw->pop, &D_RW(free_pool)->lock);
+
+					POBJ_LIST_INSERT_TAIL(gb_pmw->pop, &D_RW(free_pool)->head, flush_list, list_entries);
+					D_RW(free_pool)->cur_lists++;
+
+					pmemobj_rwlock_unlock(gb_pmw->pop, &D_RW(free_pool)->lock);
+
+#if defined (UNIV_PMEMOBJ_BUF_DEBUG)
+				printf("PMEM_DEBUG: in fil_aio_wait(), reuse list id: %zd, cur_lists in free_pool= %zd \n", pflush_list->list_id, D_RW(free_pool)->cur_lists);
+#endif	
+				}
+				else {
+					pmemobj_rwlock_unlock(gb_pmw->pop, &pflush_list->lock);
+				}
 				
-				/*we do not need this call, 
-				it've ready called in buf_flush_write_block_low() 
-				right after we call pm_buf_write()*/
-				//buf_page_io_complete(bpage);
 			}
 			else {
 				buf_page_io_complete(static_cast<buf_page_t*>(message));

@@ -41,6 +41,9 @@ typedef struct __pmem_buf_block_t PMEM_BUF_BLOCK;
 struct __pmem_buf_block_list_t;
 typedef struct __pmem_buf_block_list_t PMEM_BUF_BLOCK_LIST;
 
+struct __pmem_buf_free_pool;
+typedef struct __pmem_buf_free_pool PMEM_BUF_FREE_POOL;
+
 struct __pmem_dbw;
 typedef struct __pmem_dbw PMEM_DBW;
 
@@ -61,6 +64,7 @@ POBJ_LAYOUT_TOID(my_pmemobj, PMEM_DBW);
 POBJ_LAYOUT_TOID(my_pmemobj, PMEM_BUF);
 POBJ_LAYOUT_TOID(my_pmemobj, PMEM_BUF_BLOCK_LIST);
 POBJ_LAYOUT_TOID(my_pmemobj, TOID(PMEM_BUF_BLOCK_LIST));
+POBJ_LAYOUT_TOID(my_pmemobj, PMEM_BUF_FREE_POOL);
 POBJ_LAYOUT_TOID(my_pmemobj, PMEM_BUF_BLOCK);
 POBJ_LAYOUT_END(my_pmemobj);
 
@@ -175,11 +179,23 @@ struct __pmem_buf_block_t{
 
 struct __pmem_buf_block_list_t {
 	PMEMrwlock			lock;
+	uint64_t			list_id;
 	POBJ_LIST_HEAD(block_list, PMEM_BUF_BLOCK) head;
-	TOID(PMEM_BUF_BLOCK_LIST) pext_list;
+	//TOID(PMEM_BUF_BLOCK_LIST) pext_list;
+	TOID(PMEM_BUF_BLOCK) next_free_block;
+
+	POBJ_LIST_ENTRY(PMEM_BUF_BLOCK_LIST) list_entries;
+
 	size_t				max_pages; //max number of pages
 	size_t				cur_pages; // current buffered pages
 	bool				is_flush;
+	size_t				n_pending; //number of pending flush
+	int					check;
+};
+struct __pmem_buf_free_pool {
+	PMEMrwlock			lock;
+	POBJ_LIST_HEAD(list_list, PMEM_BUF_BLOCK_LIST) head;
+	size_t				cur_lists;
 };
 
 struct __pmem_buf {
@@ -188,7 +204,7 @@ struct __pmem_buf {
 	PMEMoid  data; //pmem data
 	char* p_align; //align 
 	bool is_new;
-	TOID(PMEM_BUF_BLOCK_LIST) free;
+	TOID(PMEM_BUF_FREE_POOL) free_pool;
 	TOID_ARRAY(TOID(PMEM_BUF_BLOCK_LIST)) buckets;
 };
 
@@ -205,13 +221,16 @@ int
 pm_buf_write(PMEMobjpool* pop, PMEM_BUF* buf, buf_page_t* bpage, void* data);
 
 size_t
-pm_buf_read(PMEMobjpool* pop, PMEM_BUF* buf, page_id_t page_id, void* data);
+pm_buf_read(PMEMobjpool* pop, PMEM_BUF* buf, const page_id_t page_id, const page_size_t size, void* data);
 
 void
-pm_buf_write_list_to_datafile(PMEMobjpool* pop, PMEM_BUF* buf, TOID(PMEM_BUF_BLOCK_LIST) list_new, PMEM_BUF_BLOCK_LIST* plist);
+pm_buf_write_list_to_datafile(PMEMobjpool* pop, PMEM_BUF* buf, TOID(PMEM_BUF_BLOCK_LIST)flush_list);
+//pm_buf_write_list_to_datafile(PMEMobjpool* pop, PMEM_BUF* buf, TOID(PMEM_BUF_BLOCK_LIST) list_new, PMEM_BUF_BLOCK_LIST* plist);
 
 void
-pm_buf_write_aio_complete(PMEMobjpool* pop, PMEM_BUF* buf, TOID(PMEM_BUF_BLOCK) toid_block);
+pm_buf_write_aio_complete(PMEMobjpool* pop, PMEM_BUF* buf, TOID(PMEM_BUF_BLOCK)* ptoid_block);
+//pm_buf_write_aio_complete(PMEMobjpool* pop, PMEM_BUF* buf, TOID(PMEM_BUF_BLOCK) toid_block);
+//pm_buf_write_aio_complete(PMEMobjpool* pop, PMEM_BUF* buf, PMEMoid* poid);
 
 PMEM_BUF* pm_pop_get_buf(PMEMobjpool* pop);
 //DEBUG functions

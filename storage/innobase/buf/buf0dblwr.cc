@@ -172,8 +172,8 @@ buf_dblwr_init(
 		}
 	}
 	else {
-		printf("!!!!!!! [PMEMOBJ_INFO]: the server restart from a crash but the buffer is persist, in pmem: size = %zd free list has = %zd pages\n", 
-				gb_pmw->pbuf->size, D_RW(gb_pmw->pbuf->free)->cur_pages);
+		printf("!!!!!!! [PMEMOBJ_INFO]: the server restart from a crash but the buffer is persist, in pmem: size = %zd free_pool has = %zd free lists\n", 
+				gb_pmw->pbuf->size, D_RW(gb_pmw->pbuf->free_pool)->cur_lists);
 	}
 	//[TODO] Recovery handler
 #endif /* UNIV_PMEMOBJ_BUF */
