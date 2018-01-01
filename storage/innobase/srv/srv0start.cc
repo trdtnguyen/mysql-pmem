@@ -1896,6 +1896,22 @@ innobase_start_or_create_for_mysql(void)
 	fsp_init();
 	log_init();
 
+#if defined (UNIV_PMEMOBJ_BUF)
+	//Allocate the buffer in pmem
+	if (!gb_pmw->pbuf) {
+		size_t buf_size = srv_pmem_buf_size * 1024 * 1024;
+			printf("PMEMOBJ_INFO: allocate %zd MB of buffer in pmem\n", srv_pmem_buf_size);
+		if ( pm_wrapper_buf_alloc(gb_pmw, buf_size, UNIV_PAGE_SIZE) == PMEM_ERROR ) {
+			printf("PMEMOBJ_ERROR: error when allocate buffer in buf_dblwr_init()\n");
+		}
+	}
+	else {
+		printf("!!!!!!! [PMEMOBJ_INFO]: the server restart from a crash but the buffer is persist, in pmem: size = %zd free_pool has = %zd free lists\n", 
+				gb_pmw->pbuf->size, D_RW(gb_pmw->pbuf->free_pool)->cur_lists);
+	}
+	//[TODO] Recovery handler
+#endif /* UNIV_PMEMOBJ_BUF */
+
 	recv_sys_create();
 	recv_sys_init(buf_pool_get_curr_size());
 	lock_sys_create(srv_lock_table_size);

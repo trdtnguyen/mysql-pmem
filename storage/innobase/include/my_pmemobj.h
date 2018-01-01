@@ -168,7 +168,8 @@ struct __pmem_buf_block_t{
 //	size_t			size;
 	page_size_t					size;
 	int							check;
-	//	buf_page_t*		bpage;
+	//buf_page_t*		bpage;
+	bool	sync;
 	PMEM_BLOCK_STATE			state;
 	TOID(PMEM_BUF_BLOCK_LIST)	list;
 	uint64_t		pmemaddr; /*
@@ -218,14 +219,15 @@ void
 pm_buf_list_init(PMEMobjpool* pop, PMEM_BUF* buf, const size_t size, const size_t page_size);
 
 int
-pm_buf_write(PMEMobjpool* pop, PMEM_BUF* buf, buf_page_t* bpage, void* data);
+//pm_buf_write(PMEMobjpool* pop, PMEM_BUF* buf, buf_page_t* bpage, void* data, bool sync);
+pm_buf_write(PMEMobjpool* pop, PMEM_BUF* buf, page_id_t page_id, page_size_t size, void* src_data, bool sync);
 
 size_t
 pm_buf_read(PMEMobjpool* pop, PMEM_BUF* buf, const page_id_t page_id, const page_size_t size, void* data);
 
 void
-pm_buf_write_list_to_datafile(PMEMobjpool* pop, PMEM_BUF* buf, TOID(PMEM_BUF_BLOCK_LIST)flush_list);
-//pm_buf_write_list_to_datafile(PMEMobjpool* pop, PMEM_BUF* buf, TOID(PMEM_BUF_BLOCK_LIST) list_new, PMEM_BUF_BLOCK_LIST* plist);
+//pm_buf_flush_list(PMEMobjpool* pop, PMEM_BUF* buf, TOID(PMEM_BUF_BLOCK_LIST)flush_list);
+pm_buf_flush_list(PMEMobjpool* pop, PMEM_BUF* buf, PMEM_BUF_BLOCK_LIST* plist);
 
 void
 pm_buf_write_aio_complete(PMEMobjpool* pop, PMEM_BUF* buf, TOID(PMEM_BUF_BLOCK)* ptoid_block);

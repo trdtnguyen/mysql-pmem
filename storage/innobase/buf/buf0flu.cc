@@ -1087,10 +1087,11 @@ buf_flush_write_block_low(
 	//(3) just memcpy to our buffer in pmem
 	// Single write is treated similar with batch write
 	// frame can be ((buf_block_t*) bpage)->frame or bpage->zip.data
-	int ret = pm_buf_write(gb_pmw->pop, gb_pmw->pbuf, bpage,(void*)frame);
+	int ret = pm_buf_write(gb_pmw->pop, gb_pmw->pbuf, bpage->id, bpage->size,(void*)frame, sync);
 	assert(ret == PMEM_SUCCESS);
 	//After memcpy, We need this call to sync the buffer pool variables	
-	buf_page_io_complete(bpage, true);
+	if (!sync)
+		buf_page_io_complete(bpage);
 #else //original
 	/* Disable use of double-write buffer for temporary tablespace.
 	Given the nature and load of temporary tablespace doublewrite buffer
@@ -1118,6 +1119,7 @@ buf_flush_write_block_low(
 		ut_ad(!sync);
 		buf_dblwr_add_to_batch(bpage);
 	}
+#endif /*UNIV_PMEMOBJ_BUF*/
 
 	/* When doing single page flushing the IO is done synchronously
 	and we flush the changes to disk only for the tablespace we
@@ -1130,7 +1132,6 @@ buf_flush_write_block_low(
 		LRU list as well. */
 		buf_page_io_complete(bpage, true);
 	}
-#endif /*UNIV_PMEMOBJ_BUF*/
 
 	/* Increment the counter of I/O operations used
 	for selecting LRU policy. */

@@ -204,6 +204,8 @@ buf_read_page_low(
 		if (!buf_page_io_complete(bpage)) {
 			return(0);
 		}
+		if (!sync)
+			printf("PMEM_DEBUG: in buf_read_page_low sync is FALSE!!!! \n");
 	}
 	else {
 	// if the page_id is not in pmem buffer, read it from disk as normal

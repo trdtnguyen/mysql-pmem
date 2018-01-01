@@ -32,11 +32,25 @@ PMEM_WRAPPER* gb_pmw = NULL;
 PMEM_WRAPPER* pm_wrapper_create(const char* path, const size_t pool_size){
 	PMEM_WRAPPER* pmw;
 	PMEMobjpool* pop = NULL;
+	int check_pmem;
+
+	const char* reason;
+
+	reason = pmemobj_check_version(PMEMOBJ_MAJOR_VERSION,
+			                               PMEMOBJ_MINOR_VERSION);
+	if (reason != NULL) {
+			/* version check failed, reason string tells you why */
+		fprintf(stderr, "PMEM_ERROR: checking version fail: %s \n", pmemobj_errormsg());
+	}
+
 
 	pmw =  (PMEM_WRAPPER*) malloc(sizeof(PMEM_WRAPPER));
 	if (!pmw)
 		goto err;
 	pmw->is_new = true;
+
+	//Force use pmem
+	setenv("PMEM_IS_PMEM_FORCE", "1", 1);
 
 	/*create new or open existed PMEMobjpool*/
 //	size =  PMEM_MAX_LOG_BUF_SIZE +
@@ -57,6 +71,14 @@ PMEM_WRAPPER* pm_wrapper_create(const char* path, const size_t pool_size){
 			goto err;
 		}
 	}
+	//Checking
+	check_pmem = pmemobj_check(path, POBJ_LAYOUT_NAME(my_pmemobj));
+	if (check_pmem == -1) {
+		printf("PMEM_ERROR: check_pmem = -1, errno is %d\n", errno);
+		fprintf(stderr, "PMEM_ERROR: check_pmem = -1, detail: %s \n", pmemobj_errormsg());
+		assert(0);
+	}
+	printf ("!!!!!!   PMEM_INFO: CHECK CONSISTENCE check_pmem = %d (1: consistent, 0 not-consistent !!!!!!)\n", check_pmem);		
 	pmw->pop = pop;
 
 //	pmemw->pop = pm_create_PMEMobjpool(path);

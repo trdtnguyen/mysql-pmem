@@ -162,21 +162,21 @@ buf_dblwr_init(
 
 	buf_dblwr->in_use = static_cast<bool*>(
 		ut_zalloc_nokey(buf_size * sizeof(bool)));
-#if defined (UNIV_PMEMOBJ_BUF)
+//#if defined (UNIV_PMEMOBJ_BUF)
 	//Allocate the buffer in pmem
-	if (!gb_pmw->pbuf) {
-		size_t buf_size = srv_pmem_buf_size * 1024 * 1024;
-			printf("PMEMOBJ_INFO: allocate %zd MB of buffer in pmem\n", srv_pmem_buf_size);
-		if ( pm_wrapper_buf_alloc(gb_pmw, buf_size, UNIV_PAGE_SIZE) == PMEM_ERROR ) {
-			printf("PMEMOBJ_ERROR: error when allocate buffer in buf_dblwr_init()\n");
-		}
-	}
-	else {
-		printf("!!!!!!! [PMEMOBJ_INFO]: the server restart from a crash but the buffer is persist, in pmem: size = %zd free_pool has = %zd free lists\n", 
-				gb_pmw->pbuf->size, D_RW(gb_pmw->pbuf->free_pool)->cur_lists);
-	}
+//	if (!gb_pmw->pbuf) {
+//		size_t buf_size = srv_pmem_buf_size * 1024 * 1024;
+//			printf("PMEMOBJ_INFO: allocate %zd MB of buffer in pmem\n", srv_pmem_buf_size);
+//		if ( pm_wrapper_buf_alloc(gb_pmw, buf_size, UNIV_PAGE_SIZE) == PMEM_ERROR ) {
+//			printf("PMEMOBJ_ERROR: error when allocate buffer in buf_dblwr_init()\n");
+//		}
+//	}
+//	else {
+//		printf("!!!!!!! [PMEMOBJ_INFO]: the server restart from a crash but the buffer is persist, in pmem: size = %zd free_pool has = %zd free lists\n", 
+//				gb_pmw->pbuf->size, D_RW(gb_pmw->pbuf->free_pool)->cur_lists);
+//	}
 	//[TODO] Recovery handler
-#endif /* UNIV_PMEMOBJ_BUF */
+//#endif /* UNIV_PMEMOBJ_BUF */
 #if defined (UNIV_PMEMOBJ_DBW)
 	//Allocate the double write buffer on PMEM
 	if (!gb_pmw->pdbw){
