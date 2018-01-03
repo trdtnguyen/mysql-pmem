@@ -1081,18 +1081,17 @@ buf_flush_write_block_low(
 		break;
 	}
 #if defined(UNIV_PMEMOBJ_BUF)
-	//If pmem buffer is used:
-	//(1) we don't need writes to double write buffer
-	//(2) we also don't need to write and flush pages to disk
-	//(3) just memcpy to our buffer in pmem
-	// Single write is treated similar with batch write
-	// frame can be ((buf_block_t*) bpage)->frame or bpage->zip.data
-	int ret = pm_buf_write(gb_pmw->pop, gb_pmw->pbuf, bpage->id, bpage->size,(void*)frame, sync);
-	assert(ret == PMEM_SUCCESS);
-	//After memcpy, We need this call to sync the buffer pool variables	
-	if (!sync)
-		buf_page_io_complete(bpage);
-#else //original
+	// We capture the write from buffer pool flush
+	// EXCEPT: space 0
+	if (bpage->id.page_no() != 0) {
+		int ret = pm_buf_write(gb_pmw->pop, gb_pmw->pbuf, bpage->id, bpage->size,(void*)frame, sync);
+		assert(ret == PMEM_SUCCESS);
+		//After memcpy, We need this call to sync the buffer pool variables	
+		if (!sync)
+			buf_page_io_complete(bpage);
+		goto skip_write;
+	}
+#endif /*UNIV_PMEMOBJ_BUF*/
 	/* Disable use of double-write buffer for temporary tablespace.
 	Given the nature and load of temporary tablespace doublewrite buffer
 	adds an overhead during flushing. */
@@ -1119,6 +1118,8 @@ buf_flush_write_block_low(
 		ut_ad(!sync);
 		buf_dblwr_add_to_batch(bpage);
 	}
+#if defined(UNIV_PMEMOBJ_BUF)
+skip_write:
 #endif /*UNIV_PMEMOBJ_BUF*/
 
 	/* When doing single page flushing the IO is done synchronously

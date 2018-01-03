@@ -76,7 +76,7 @@ PMEM_WRAPPER* pm_wrapper_create(const char* path, const size_t pool_size){
 	if (check_pmem == -1) {
 		printf("PMEM_ERROR: check_pmem = -1, errno is %d\n", errno);
 		fprintf(stderr, "PMEM_ERROR: check_pmem = -1, detail: %s \n", pmemobj_errormsg());
-		assert(0);
+		//assert(0);
 	}
 	printf ("!!!!!!   PMEM_INFO: CHECK CONSISTENCE check_pmem = %d (1: consistent, 0 not-consistent !!!!!!)\n", check_pmem);		
 	pmw->pop = pop;

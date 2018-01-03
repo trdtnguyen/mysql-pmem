@@ -1936,28 +1936,28 @@ fil_write_flushed_lsn(
 
 	const page_id_t	page_id(TRX_SYS_SPACE, 0);
 
-#if defined(UNIV_PMEMOBJ_BUF)
-	size_t read_bytes=  pm_buf_read(gb_pmw->pop, gb_pmw->pbuf, page_id, univ_page_size, buf);
-	if (read_bytes > 0) {
-		err = DB_SUCCESS;
-	}
-	else {
+//#if defined(UNIV_PMEMOBJ_BUF)
+//	size_t read_bytes=  pm_buf_read(gb_pmw->pop, gb_pmw->pbuf, page_id, univ_page_size, buf);
+//	if (read_bytes > 0) {
+//		err = DB_SUCCESS;
+//	}
+//	else {
 		//Read from disk
-		err = fil_read(page_id, univ_page_size, 0, univ_page_size.physical(),
-				buf);
-	}
-#else //origninal only read from disk
+//		err = fil_read(page_id, univ_page_size, 0, univ_page_size.physical(),
+//				buf);
+//	}
+//#else //origninal only read from disk
 	err = fil_read(page_id, univ_page_size, 0, univ_page_size.physical(),
 		       buf);
 
-#endif //UNIV_PMEMOBJ_BUF
+//#endif //UNIV_PMEMOBJ_BUF
 	if (err == DB_SUCCESS) {
 		mach_write_to_8(buf + FIL_PAGE_FILE_FLUSH_LSN, lsn);
-#if defined(UNIV_PMEMOBJ_BUF)
+//#if defined(UNIV_PMEMOBJ_BUF)
 		//We also write page 0 to our PMEM
-		int ret = pm_buf_write(gb_pmw->pop, gb_pmw->pbuf, page_id, univ_page_size, static_cast<void*>(buf), true);
-		assert(ret == PMEM_SUCCESS);
-#endif //UNIV_PMEMOBJ_BUF
+//		int ret = pm_buf_write(gb_pmw->pop, gb_pmw->pbuf, page_id, univ_page_size, static_cast<void*>(buf), true);
+//		assert(ret == PMEM_SUCCESS);
+//#endif //UNIV_PMEMOBJ_BUF
 		err = fil_write(page_id, univ_page_size, 0,
 				univ_page_size.physical(), buf);
 
@@ -2335,14 +2335,12 @@ fil_recreate_tablespace(
 		buf_flush_init_for_writing(
 			NULL, page, &page_zip, 0,
 			fsp_is_checksum_disabled(space_id));
-#if defined (UNIV_PMEMOBJ_BUF)
-		int ret = pm_buf_write(gb_pmw->pop, gb_pmw->pbuf, page_id_t(space_id, 0), page_size, static_cast<void*>(page_zip.data), true);
-		assert(ret == PMEM_SUCCESS);
-		
-#else
+//#if defined (UNIV_PMEMOBJ_BUF)
+//		int ret = pm_buf_write(gb_pmw->pop, gb_pmw->pbuf, page_id_t(space_id, 0), page_size, static_cast<void*>(page_zip.data), true);
+//		assert(ret == PMEM_SUCCESS);
+//#endif //UNIV_PMEMOBJ_BUF
 		err = fil_write(page_id_t(space_id, 0), page_size, 0,
 				page_size.physical(), page_zip.data);
-#endif //UNIV_PMEMOBJ_BUF
 		ut_free(buf);
 
 		if (err != DB_SUCCESS) {
@@ -2405,14 +2403,12 @@ fil_recreate_tablespace(
 				block, page, NULL, recv_lsn,
 				fsp_is_checksum_disabled(space_id));
 
-#if defined (UNIV_PMEMOBJ_BUF)
-		int ret = pm_buf_write(gb_pmw->pop, gb_pmw->pbuf, cur_page_id, page_size, static_cast<void*>(page), true);
-		assert(ret == PMEM_SUCCESS);
-		
-#else
+//#if defined (UNIV_PMEMOBJ_BUF)
+//		int ret = pm_buf_write(gb_pmw->pop, gb_pmw->pbuf, cur_page_id, page_size, static_cast<void*>(page), true);
+//		assert(ret == PMEM_SUCCESS);
+//#endif //UNIV_PMEMOBJ_BUF
 			err = fil_write(cur_page_id, page_size, 0,
 					page_size.physical(), page);
-#endif //UNIV_PMEMOBJ_BUF
 		} else {
 			ut_ad(page_size.is_compressed());
 
@@ -2426,15 +2422,13 @@ fil_recreate_tablespace(
 					block, page, page_zip, recv_lsn,
 					fsp_is_checksum_disabled(space_id));
 
-#if defined (UNIV_PMEMOBJ_BUF)
-		int ret = pm_buf_write(gb_pmw->pop, gb_pmw->pbuf, cur_page_id, page_size, static_cast<void*>(page_zip->data), true);
-		assert(ret == PMEM_SUCCESS);
-		
-#else
+//#if defined (UNIV_PMEMOBJ_BUF)
+//		int ret = pm_buf_write(gb_pmw->pop, gb_pmw->pbuf, cur_page_id, page_size, static_cast<void*>(page_zip->data), true);
+//		assert(ret == PMEM_SUCCESS);
+//#endif //UNIV_PMEMOBJ_BUF
 				err = fil_write(cur_page_id, page_size, 0,
 						page_size.physical(),
 						page_zip->data);
-#endif //UNIV_PMEMOBJ_BUF
 			} else {
 #ifdef UNIV_DEBUG
 				const byte*	data = block->page.zip.data;
@@ -3706,7 +3700,12 @@ fil_ibd_create(
 		buf_flush_init_for_writing(
 			NULL, page, NULL, 0,
 			fsp_is_checksum_disabled(space_id));
-
+//#if defined (UNIV_PMEMOBJ_BUF)
+		//write page 0 of space_id, we also write to disk
+//		int ret = pm_buf_write(gb_pmw->pop, gb_pmw->pbuf, 
+//				page_id_t(space_id, 0), page_size, static_cast<void*>(page), true);
+//		assert(ret == PMEM_SUCCESS);
+//#endif //UNIV_PMEMOBJ_BUF
 		err = os_file_write(
 			request, path, file, page, 0, page_size.physical());
 
@@ -3727,6 +3726,12 @@ fil_ibd_create(
 			NULL, page, &page_zip, 0,
 			fsp_is_checksum_disabled(space_id));
 
+//#if defined (UNIV_PMEMOBJ_BUF)
+		//write page 0 of space_id, we also write to disk
+//		int ret = pm_buf_write(gb_pmw->pop, gb_pmw->pbuf, 
+//				page_id_t(space_id, 0), page_size, static_cast<void*>(page_zip.data), true);
+//		assert(ret == PMEM_SUCCESS);
+//#endif //UNIV_PMEMOBJ_BUF
 		err = os_file_write(
 			request, path, file, page_zip.data, 0,
 			page_size.physical());
@@ -5233,24 +5238,24 @@ fil_extend_tablespaces_to_stored_len(void)
 		mutex_exit(&fil_system->mutex); /* no need to protect with a
 					      mutex, because this is a
 					      single-threaded operation */
-#if defined(UNIV_PMEMOBJ_BUF)
-	size_t read_bytes=  pm_buf_read(gb_pmw->pop, gb_pmw->pbuf, page_id_t(space->id,0), page_size_t(space->flags), buf);
-	if (read_bytes > 0) {
-		error = DB_SUCCESS;
-	}
-	else {
+//#if defined(UNIV_PMEMOBJ_BUF)
+//	size_t read_bytes=  pm_buf_read(gb_pmw->pop, gb_pmw->pbuf, page_id_t(space->id,0), page_size_t(space->flags), buf);
+//	if (read_bytes > 0) {
+//		error = DB_SUCCESS;
+//	}
+//	else {
 		//Read from disk
+//		error = fil_read(
+//			page_id_t(space->id, 0),
+//			page_size_t(space->flags),
+//			0, univ_page_size.physical(), buf);
+//	}
+//#else //origninal only read from disk
 		error = fil_read(
 			page_id_t(space->id, 0),
 			page_size_t(space->flags),
 			0, univ_page_size.physical(), buf);
-	}
-#else //origninal only read from disk
-		error = fil_read(
-			page_id_t(space->id, 0),
-			page_size_t(space->flags),
-			0, univ_page_size.physical(), buf);
-#endif //UNIV_PMEMOBJ_BUF
+//#endif //UNIV_PMEMOBJ_BUF
 		ut_a(error == DB_SUCCESS);
 
 		size_in_header = fsp_header_get_field(buf, FSP_SIZE);
@@ -5809,6 +5814,21 @@ fil_io(
 	req_type.block_size(node->block_size);
 
 	dberr_t	err;
+#if defined (UNIV_PMEMOBJ_BUF)
+	if (req_type.is_read() && !req_type.is_log()) {
+		size_t read_bytes=  pm_buf_read(gb_pmw->pop, gb_pmw->pbuf,
+				page_id, page_size, buf);
+
+		if (read_bytes > 0) {
+			err = DB_SUCCESS;
+			if (!sync) {
+				//this call is necessary to notify the buffer pool the read ID complete
+				buf_page_io_complete(static_cast<buf_page_t*>(message));
+			}
+			goto skip_read;
+		}
+	}
+#endif //UNIV_PMEMOBJ_BUF
 
 #ifdef UNIV_HOTBACKUP
 	/* In mysqlbackup do normal i/o, not aio */
@@ -5834,6 +5854,10 @@ fil_io(
 		node, message);
 
 #endif /* UNIV_HOTBACKUP */
+
+#if defined (UNIV_PMEMOBJ_BUF)
+skip_read:
+#endif //UNIV_PMEMOBJ_BUF
 
 #if defined (UNIV_NVM_LOG) 
 		if (req_type.is_log() && mode == OS_AIO_LOG){
@@ -5944,20 +5968,27 @@ fil_aio_wait(
 				//pmemobj_rwlock_wrlock(gb_pmw->pop, &pblock->lock);
 				//This AIO is called from pmem implementation
 				//buf_page_t* bpage = pblock->bpage;
+
+				//pmemobj_rwlock_wrlock(gb_pmw->pop, &pblock->lock);
+
 				TOID(PMEM_BUF_BLOCK_LIST) flush_list;
 				TOID_ASSIGN(flush_list, pblock->list.oid);
-				PMEM_BUF_BLOCK_LIST* pflush_list = D_RW(flush_list);
-#if defined (UNIV_PMEMOBJ_BUF_DEBUG)
-				//printf("PMEM_DEBUG: in fil_aio_wait(), finish a page id %zd space %zd in list %zd \n", pblock->id.page_no(), pblock->id.space(), pflush_list->list_id); 
-#endif	
+				//PMEM_BUF_BLOCK_LIST* pflush_list = D_RW(flush_list);
+				PMEM_BUF_BLOCK_LIST* pflush_list = D_RW(pblock->list);
+
+				//pmemobj_rwlock_unlock(gb_pmw->pop, &pblock->lock);
+//#if defined (UNIV_PMEMOBJ_BUF_DEBUG)
+				printf("PMEM_DEBUG: in fil_aio_wait(), finish a page id %zd space %zd in list %zd n_pending = %zu n_flush = %zu try to get pflush_list->lock... \n", pblock->id.page_no(), pblock->id.space(), pflush_list->list_id, pflush_list->n_pending, pflush_list->n_flush); 
+//#endif	
+				//pmemobj_rwlock_unlock(gb_pmw->pop, &pblock->lock);
 				pmemobj_rwlock_wrlock(gb_pmw->pop, &pflush_list->lock);
 
 				//pblock->state = PMEM_FREE_BLOCK;
-				//pmemobj_rwlock_unlock(gb_pmw->pop, &pblock->lock);
 				//if(!pblock->sync)
 				//buf_page_io_complete(pblock->bpage);
 
 				pflush_list->n_pending--;
+				printf("PMEM_DEBUG: in fil_aio_wait(), page_id %zd space %zd list id: %zd, n_pending %zu cur_pages %zu n_flush %zu \n", pblock->id.page_no(), pblock->id.space(), pflush_list->list_id, pflush_list->n_pending, pflush_list->cur_pages, pflush_list->n_flush);
 				if (pflush_list->n_pending == 0) {
 					TOID(PMEM_BUF_BLOCK) iter;
 					//reset the list
@@ -5975,13 +6006,13 @@ fil_aio_wait(
 					PMEM_BUF_FREE_POOL* pfree_pool;
 					pfree_pool = D_RW(gb_pmw->pbuf->free_pool);
 
+					//printf("PMEM_DEBUG: in fil_aio_wait(), try to lock free_pool list id: %zd, cur_lists in free_pool= %zd \n", pflush_list->list_id, pfree_pool->cur_lists);
 					pmemobj_rwlock_wrlock(gb_pmw->pop, &pfree_pool->lock);
 
 					POBJ_LIST_INSERT_TAIL(gb_pmw->pop, &pfree_pool->head, flush_list, list_entries);
 					pfree_pool->cur_lists++;
 
 					printf("PMEM_DEBUG: in fil_aio_wait(), reuse list id: %zd, cur_lists in free_pool= %zd \n", pflush_list->list_id, pfree_pool->cur_lists);
-
 					pmemobj_rwlock_unlock(gb_pmw->pop, &pfree_pool->lock);
 				}
 				pmemobj_rwlock_unlock(gb_pmw->pop, &pflush_list->lock);

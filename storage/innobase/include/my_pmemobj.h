@@ -191,6 +191,7 @@ struct __pmem_buf_block_list_t {
 	size_t				cur_pages; // current buffered pages
 	bool				is_flush;
 	size_t				n_pending; //number of pending flush
+	size_t				n_flush; //number of flush
 	int					check;
 };
 struct __pmem_buf_free_pool {
@@ -201,6 +202,7 @@ struct __pmem_buf_free_pool {
 
 struct __pmem_buf {
 	size_t size;
+	size_t page_size;
 	PMEM_OBJ_TYPES type;	
 	PMEMoid  data; //pmem data
 	char* p_align; //align 

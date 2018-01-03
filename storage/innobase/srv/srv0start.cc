@@ -1759,6 +1759,13 @@ innobase_start_or_create_for_mysql(void)
 	size_t pool_size = srv_pmem_pool_size * 1024 * 1024;
 	gb_pmw = pm_wrapper_create(PMEM_FILE_PATH, pool_size);
 	assert(gb_pmw);
+	int check_pmem = pmemobj_check(PMEM_FILE_PATH, POBJ_LAYOUT_NAME(my_pmemobj));
+	if (check_pmem == -1) {
+		fprintf(stderr, "PMEM_ERROR: PMEM_FILE_PATH is %s, check_pmem = -1, detail: %s \n", PMEM_FILE_PATH, pmemobj_errormsg());
+	}
+	else {
+		printf("PMEM_INO: PMEM CHECK IS OK!\n");
+	}
 #endif
 	srv_boot();
 
@@ -1908,6 +1915,17 @@ innobase_start_or_create_for_mysql(void)
 	else {
 		printf("!!!!!!! [PMEMOBJ_INFO]: the server restart from a crash but the buffer is persist, in pmem: size = %zd free_pool has = %zd free lists\n", 
 				gb_pmw->pbuf->size, D_RW(gb_pmw->pbuf->free_pool)->cur_lists);
+		//Check the page_size of the previous run with current run
+		if (gb_pmw->pbuf->page_size != UNIV_PAGE_SIZE) {
+			printf("PMEM_ERROR: the pmem buffer size = %zu is different with UNIV_PAGE_SIZE = %zu, you must use the same page_size!!!\n ");
+			assert(0);
+		}
+			
+		//We need to re-align the p_align
+		char* p;
+		p = static_cast<char*> (pmemobj_direct(gb_pmw->pbuf->data));
+		assert(p);
+		gb_pmw->pbuf->p_align = static_cast<char*> (ut_align(p, UNIV_PAGE_SIZE));
 	}
 	//[TODO] Recovery handler
 #endif /* UNIV_PMEMOBJ_BUF */
