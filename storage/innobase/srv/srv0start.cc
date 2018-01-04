@@ -1960,6 +1960,18 @@ innobase_start_or_create_for_mysql(void)
 	while (!buf_page_cleaner_is_active) {
 		os_thread_sleep(10000);
 	}
+#if defined (UNIV_PMEMOBJ_BUF) 
+	//Declare the coordinator and worker flush threads for PMEM
+	pm_list_cleaner_init();
+
+	os_thread_create(pm_buf_flush_list_cleaner_coordinator,
+			 NULL, NULL);
+
+	for (i = 1; i < PMEM_N_BUCKETS; ++i) {
+		os_thread_create(pm_buf_flush_list_cleaner_worker,
+				 NULL, NULL);
+	}
+#endif //UNIV_PMEMOBJ_BUF
 
 	srv_start_state_set(SRV_START_STATE_IO);
 

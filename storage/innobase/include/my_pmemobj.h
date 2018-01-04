@@ -56,16 +56,24 @@ typedef struct __pmem_buf PMEM_BUF;
 struct __pmem_wrapper;
 typedef struct __pmem_wrapper PMEM_WRAPPER;
 
+struct __pmem_list_cleaner_slot;
+typedef struct __pmem_list_cleaner_slot PMEM_LIST_CLEANER_SLOT;
+
+struct __pmem_list_cleaner;
+typedef struct __pmem_list_cleaner PMEM_LIST_CLEANER;
+
+
 
 POBJ_LAYOUT_BEGIN(my_pmemobj);
 POBJ_LAYOUT_TOID(my_pmemobj, char);
 POBJ_LAYOUT_TOID(my_pmemobj, PMEM_LOG_BUF);
 POBJ_LAYOUT_TOID(my_pmemobj, PMEM_DBW);
 POBJ_LAYOUT_TOID(my_pmemobj, PMEM_BUF);
+POBJ_LAYOUT_TOID(my_pmemobj, PMEM_BUF_FREE_POOL);
 POBJ_LAYOUT_TOID(my_pmemobj, PMEM_BUF_BLOCK_LIST);
 POBJ_LAYOUT_TOID(my_pmemobj, TOID(PMEM_BUF_BLOCK_LIST));
-POBJ_LAYOUT_TOID(my_pmemobj, PMEM_BUF_FREE_POOL);
 POBJ_LAYOUT_TOID(my_pmemobj, PMEM_BUF_BLOCK);
+POBJ_LAYOUT_TOID(my_pmemobj, TOID(PMEM_BUF_BLOCK));
 POBJ_LAYOUT_END(my_pmemobj);
 
 
@@ -162,7 +170,7 @@ struct list_constr_args{
  * */
 struct __pmem_buf_block_t{
 	PMEMrwlock					lock;
-	POBJ_LIST_ENTRY(PMEM_BUF_BLOCK) entries;
+	//POBJ_LIST_ENTRY(PMEM_BUF_BLOCK) entries;
 //	uint64_t		id;
 	page_id_t					id;
 //	size_t			size;
@@ -179,9 +187,10 @@ struct __pmem_buf_block_t{
 };
 
 struct __pmem_buf_block_list_t {
-	PMEMrwlock			lock;
-	uint64_t			list_id;
-	POBJ_LIST_HEAD(block_list, PMEM_BUF_BLOCK) head;
+	PMEMrwlock				lock;
+	uint64_t				list_id;
+	TOID_ARRAY(TOID(PMEM_BUF_BLOCK))	arr;
+	//POBJ_LIST_HEAD(block_list, PMEM_BUF_BLOCK) head;
 	//TOID(PMEM_BUF_BLOCK_LIST) pext_list;
 	TOID(PMEM_BUF_BLOCK) next_free_block;
 
@@ -240,6 +249,98 @@ PMEM_BUF* pm_pop_get_buf(PMEMobjpool* pop);
 //DEBUG functions
 
 void pm_buf_print_lists_info(PMEM_BUF* buf);
+
+///////// THREAD handler///////////////////////////
+//This struct follow the design of page_cleaner_t
+//Some functions are implemented in buf0flu.cc
+//
+
+
+struct __pmem_list_cleaner_slot {
+	pm_list_cleaner_state		state;
+	ulint						n_pages_requested;
+					/*!< number of requested pages
+					for the slot */
+	ulint						n_flushed_list;
+					/*!< number of flushed pages
+					by flush_list flushing */
+	bool						succeeded_list;
+					/*!< true if flush_list flushing
+					succeeded. */
+	ulint						flush_pass;
+					/*!< count to attempt flush_list
+					flushing */
+	ulint						flush_time;
+};
+
+struct __pmem_list_cleaner {
+	ib_mutex_t			mutex;
+	os_event_t			is_requested;
+	os_event_t			is_finished;
+	volatile ulint		n_workers;
+	bool				requested;/*!< true if requested pages to flush */
+
+	//total slots and number of each slot state
+	ulint				n_slots;
+	ulint				n_slots_requested;
+	ulint				n_slots_flushing;
+	ulint				n_slots_finished;
+	ulint				flush_time;
+	ulint				flush_pass;
+	bool				is_running;
+
+	PMEM_LIST_CLEANER_SLOT*	slots;
+
+	//this may not neccessary
+	lsn_t				lsn_limit;
+
+
+#ifdef UNIV_DEBUG
+	ulint				n_disabled_debug;
+#endif
+
+};
+
+
+void
+pm_list_cleaner_init(void);
+
+void
+pm_list_cleaner_close(void);
+
+void
+pm_lc_request(
+	ulint		min_n,
+	lsn_t		lsn_limit);
+
+ulint
+pm_lc_flush_slot(void);
+
+bool
+pm_lc_wait_finished(
+	ulint*	n_flushed_list);
+
+ulint
+pm_lc_sleep_if_needed(
+	ulint		next_loop_time,
+	int64_t		sig_count);
+
+extern "C"
+os_thread_ret_t
+DECLARE_THREAD(pm_buf_flush_list_cleaner_coordinator)(
+		void* arg);
+
+extern "C"
+os_thread_ret_t
+DECLARE_THREAD(pm_buf_flush_list_cleaner_worker)(
+		void* arg);
+
+#ifdef UNIV_DEBUG
+
+void
+pm_buf_flush_list_cleaner_disabled_loop(void);
+#endif
+
 
 #define PMEM_BUF_LIST_INSERT(pop, list, entries, type, func, args) do {\
 	POBJ_LIST_INSERT_NEW_HEAD(pop, &list.head, entries, sizeof(type), func, &args); \

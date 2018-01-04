@@ -5978,29 +5978,31 @@ fil_aio_wait(
 
 				//pmemobj_rwlock_unlock(gb_pmw->pop, &pblock->lock);
 //#if defined (UNIV_PMEMOBJ_BUF_DEBUG)
-				printf("PMEM_DEBUG: in fil_aio_wait(), finish a page id %zd space %zd in list %zd n_pending = %zu n_flush = %zu try to get pflush_list->lock... \n", pblock->id.page_no(), pblock->id.space(), pflush_list->list_id, pflush_list->n_pending, pflush_list->n_flush); 
+				//printf("PMEM_DEBUG: WAIT LOCK ... in fil_aio_wait(), page id %zd space %zd in list %zd n_pending = %zu n_flush = %zu \n", pblock->id.page_no(), pblock->id.space(), pflush_list->list_id, pflush_list->n_pending, pflush_list->n_flush); 
 //#endif	
 				//pmemobj_rwlock_unlock(gb_pmw->pop, &pblock->lock);
 				pmemobj_rwlock_wrlock(gb_pmw->pop, &pflush_list->lock);
 
-				//pblock->state = PMEM_FREE_BLOCK;
+				pmemobj_rwlock_wrlock(gb_pmw->pop, &pblock->lock);
+				pblock->state = PMEM_FREE_BLOCK;
+				pmemobj_rwlock_unlock(gb_pmw->pop, &pblock->lock);
 				//if(!pblock->sync)
 				//buf_page_io_complete(pblock->bpage);
 
 				pflush_list->n_pending--;
-				printf("PMEM_DEBUG: in fil_aio_wait(), page_id %zd space %zd list id: %zd, n_pending %zu cur_pages %zu n_flush %zu \n", pblock->id.page_no(), pblock->id.space(), pflush_list->list_id, pflush_list->n_pending, pflush_list->cur_pages, pflush_list->n_flush);
+				//printf("PMEM_DEBUG: in fil_aio_wait(), page_id %zd space %zd list id: %zd, n_pending %zu cur_pages %zu n_flush %zu \n", pblock->id.page_no(), pblock->id.space(), pflush_list->list_id, pflush_list->n_pending, pflush_list->cur_pages, pflush_list->n_flush);
 				if (pflush_list->n_pending == 0) {
 					TOID(PMEM_BUF_BLOCK) iter;
 					//reset the list
-					POBJ_LIST_FOREACH(iter, &pflush_list->head, entries) {
-						D_RW(iter)->state = PMEM_FREE_BLOCK;
-						D_RW(iter)->sync = false;
-						//D_RW(iter)->bpage = NULL;
-					}
+					//ulint i;
+					//for (i = 0; i < pflush_list->max_pages; i++) {
+					//	D_RW(D_RW(pflush_list->arr)[i])->state = PMEM_FREE_BLOCK;
+					//	D_RW(D_RW(pflush_list->arr)[i])->sync = false;
+					//}
 
 					pflush_list->cur_pages = 0;
 					pflush_list->is_flush = false;
-					TOID_ASSIGN(pflush_list->next_free_block, POBJ_LIST_FIRST(&pflush_list->head).oid);
+					//TOID_ASSIGN(pflush_list->next_free_block, POBJ_LIST_FIRST(&pflush_list->head).oid);
 
 					//we return this list to the free_pool
 					PMEM_BUF_FREE_POOL* pfree_pool;

@@ -1083,14 +1083,14 @@ buf_flush_write_block_low(
 #if defined(UNIV_PMEMOBJ_BUF)
 	// We capture the write from buffer pool flush
 	// EXCEPT: space 0
-	if (bpage->id.page_no() != 0) {
+	//if (bpage->id.page_no() != 0) {
 		int ret = pm_buf_write(gb_pmw->pop, gb_pmw->pbuf, bpage->id, bpage->size,(void*)frame, sync);
 		assert(ret == PMEM_SUCCESS);
 		//After memcpy, We need this call to sync the buffer pool variables	
 		if (!sync)
 			buf_page_io_complete(bpage);
 		goto skip_write;
-	}
+//	}
 #endif /*UNIV_PMEMOBJ_BUF*/
 	/* Disable use of double-write buffer for temporary tablespace.
 	Given the nature and load of temporary tablespace doublewrite buffer
@@ -3859,3 +3859,452 @@ FlushObserver::flush()
 		}
 	}
 }
+
+#if defined (UNIV_PMEMOBJ_BUF)
+/////////////////////////////////////////////////
+//Those functions and related structures are declared in my_pmemobj.h
+//
+static PMEM_LIST_CLEANER* list_cleaner = NULL;
+static bool pm_buf_list_cleaner_is_active = false;
+/** Event to synchronise with the flushing. */
+static os_event_t	pm_buf_flush_event;
+
+#ifdef UNIV_DEBUG
+static my_bool pm_list_cleaner_disabled_debug;
+#endif /* UNIV_DEBUG */
+
+
+
+
+void
+pm_list_cleaner_init(void) {
+	ut_ad(list_cleaner == NULL);
+
+	list_cleaner = static_cast<PMEM_LIST_CLEANER*>(
+		ut_zalloc_nokey(sizeof(*list_cleaner)));
+
+	mutex_create(LATCH_ID_PM_LIST_CLEANER, &list_cleaner->mutex);
+
+	list_cleaner->is_requested = os_event_create("pm_lc_is_requested");
+	list_cleaner->is_finished = os_event_create("pm_lc_is_finished");
+
+	list_cleaner->n_slots = static_cast<ulint>(PMEM_N_BUCKETS);
+
+	list_cleaner->slots = static_cast<PMEM_LIST_CLEANER_SLOT*>(
+		ut_zalloc_nokey(list_cleaner->n_slots
+				* sizeof(*list_cleaner->slots)));
+
+	list_cleaner->is_running = true;
+}
+
+void
+pm_list_cleaner_close(void) {
+	/* waiting for all worker threads exit */
+	while (list_cleaner->n_workers > 0) {
+		os_thread_sleep(10000);
+	}
+
+	mutex_destroy(&list_cleaner->mutex);
+
+	ut_free(list_cleaner->slots);
+
+	os_event_destroy(list_cleaner->is_finished);
+	os_event_destroy(list_cleaner->is_requested);
+
+	ut_free(list_cleaner);
+
+	list_cleaner = NULL;
+}
+
+/*
+ *Call this function in while loop of coordinator thread
+ * */
+void
+pm_lc_request(
+	ulint		min_n,
+	lsn_t		lsn_limit)
+{
+	if (min_n != ULINT_MAX) {
+		/* Ensure that flushing is spread evenly amongst the
+		buffer pool instances. When min_n is ULINT_MAX
+		we need to flush everything up to the lsn limit
+		so no limit here. */
+		min_n = (min_n + PMEM_N_BUCKETS - 1)
+			/ PMEM_N_BUCKETS;
+	}
+
+	mutex_enter(&list_cleaner->mutex);
+
+	ut_ad(list_cleaner->n_slots_requested == 0);
+	ut_ad(list_cleaner->n_slots_flushing == 0);
+	ut_ad(list_cleaner->n_slots_finished == 0);
+
+	list_cleaner->requested = (min_n > 0);
+	list_cleaner->lsn_limit = lsn_limit;
+
+	for (ulint i = 0; i < list_cleaner->n_slots; i++) {
+		PMEM_LIST_CLEANER_SLOT* slot = &list_cleaner->slots[i];
+
+		ut_ad(slot->state == LIST_CLEANER_STATE_NONE);
+
+		if (min_n == ULINT_MAX) {
+			slot->n_pages_requested = ULINT_MAX;
+		} else if (min_n == 0) {
+			slot->n_pages_requested = 0;
+		}
+
+		/* slot->n_pages_requested was already set by
+		list_cleaner_flush_pages_recommendation() */
+
+		slot->state = LIST_CLEANER_STATE_REQUESTED;
+	}
+
+	list_cleaner->n_slots_requested = list_cleaner->n_slots;
+	list_cleaner->n_slots_flushing = 0;
+	list_cleaner->n_slots_finished = 0;
+
+	os_event_set(list_cleaner->is_requested);
+
+	mutex_exit(&list_cleaner->mutex);
+}
+/*
+ * Flush a requested list to disk
+ *
+ * @return: current number of requested slots (pending)
+ * */
+ulint
+pm_lc_flush_slot(void) {
+
+	ulint	lru_tm = 0;
+	ulint	list_tm = 0;
+	int	lru_pass = 0;
+	int	list_pass = 0;
+
+	mutex_enter(&list_cleaner->mutex);
+
+	if (list_cleaner->n_slots_requested > 0) {
+		PMEM_LIST_CLEANER_SLOT*	slot = NULL;
+		ulint			i;
+
+		for (i = 0; i < list_cleaner->n_slots; i++) {
+			slot = &list_cleaner->slots[i];
+
+			if (slot->state == LIST_CLEANER_STATE_REQUESTED) {
+				break;
+			}
+		}
+
+		/* slot should be found because
+		list_cleaner->n_slots_requested > 0 */
+		ut_a(i < list_cleaner->n_slots);
+
+		buf_pool_t* buf_pool = buf_pool_from_array(i);
+
+		list_cleaner->n_slots_requested--;
+		list_cleaner->n_slots_flushing++;
+		slot->state = LIST_CLEANER_STATE_FLUSHING;
+
+		if (list_cleaner->n_slots_requested == 0) {
+			os_event_reset(list_cleaner->is_requested);
+		}
+
+		if (!list_cleaner->is_running) {
+			//slot->n_flushed_lru = 0;
+			slot->n_flushed_list = 0;
+			goto finish_mutex;
+		}
+
+		mutex_exit(&list_cleaner->mutex);
+
+		lru_tm = ut_time_ms();
+
+		/* Flush pages from end of LRU if required */
+		//slot->n_flushed_lru = buf_flush_LRU_list(buf_pool);
+
+		lru_tm = ut_time_ms() - lru_tm;
+		lru_pass++;
+
+		if (!list_cleaner->is_running) {
+			slot->n_flushed_list = 0;
+			goto finish;
+		}
+
+		/* Flush pages from flush_list if required */
+		if (list_cleaner->requested) {
+
+			list_tm = ut_time_ms();
+			//[TODO] do your flush code here
+			//slot->succeeded_list = buf_flush_do_batch(
+			//	buf_pool, BUF_FLUSH_LIST,
+			//	slot->n_pages_requested,
+			//	list_cleaner->lsn_limit,
+			//	&slot->n_flushed_list);
+
+			list_tm = ut_time_ms() - list_tm;
+			list_pass++;
+		} else {
+			slot->n_flushed_list = 0;
+			slot->succeeded_list = true;
+		}
+finish:
+		mutex_enter(&list_cleaner->mutex);
+finish_mutex:
+		list_cleaner->n_slots_flushing--;
+		list_cleaner->n_slots_finished++;
+		slot->state = LIST_CLEANER_STATE_FINISHED;
+
+		//slot->flush_lru_time += lru_tm;
+		slot->flush_time += list_tm;
+		//slot->flush_lru_pass += lru_pass;
+		slot->flush_pass += list_pass;
+
+		if (list_cleaner->n_slots_requested == 0
+		    && list_cleaner->n_slots_flushing == 0) {
+			os_event_set(list_cleaner->is_finished);
+		}
+	}
+
+	ulint	ret = list_cleaner->n_slots_requested;
+
+	mutex_exit(&list_cleaner->mutex);
+
+	return(ret);
+}
+
+bool
+pm_lc_wait_finished(
+	ulint*	n_flushed_list) {
+
+	bool	all_succeeded = true;
+
+	*n_flushed_list = 0;
+
+	os_event_wait(list_cleaner->is_finished);
+
+	mutex_enter(&list_cleaner->mutex);
+
+	ut_ad(list_cleaner->n_slots_requested == 0);
+	ut_ad(list_cleaner->n_slots_flushing == 0);
+	ut_ad(list_cleaner->n_slots_finished == list_cleaner->n_slots);
+
+	for (ulint i = 0; i < list_cleaner->n_slots; i++) {
+		PMEM_LIST_CLEANER_SLOT* slot = &list_cleaner->slots[i];
+
+		ut_ad(slot->state == LIST_CLEANER_STATE_FINISHED);
+
+		*n_flushed_list += slot->n_flushed_list;
+		all_succeeded &= slot->succeeded_list;
+
+		slot->state = LIST_CLEANER_STATE_NONE;
+
+		slot->n_pages_requested = 0;
+	}
+
+	list_cleaner->n_slots_finished = 0;
+
+	os_event_reset(list_cleaner->is_finished);
+
+	mutex_exit(&list_cleaner->mutex);
+
+	return(all_succeeded);
+
+}
+
+ulint
+pm_lc_sleep_if_needed(
+/*===============*/
+	ulint		next_loop_time,
+	int64_t		sig_count)
+{
+	ulint	cur_time = ut_time_ms();
+
+	if (next_loop_time > cur_time) {
+		/* Get sleep interval in micro seconds. We use
+		ut_min() to avoid long sleep in case of wrap around. */
+		ulint	sleep_us;
+
+		sleep_us = ut_min(static_cast<ulint>(1000000),
+				  (next_loop_time - cur_time) * 1000);
+
+		return(os_event_wait_time_low(pm_buf_flush_event,
+					      sleep_us, sig_count));
+	}
+
+	return(OS_SYNC_TIME_EXCEEDED);
+}
+
+
+/******************************************************************//**
+list_cleaner thread tasked with flushing dirty pages from the PMEM_BUF_BLOCK_LIST
+pools. As of now we'll have only one coordinator.
+@return a dummy parameter */
+extern "C"
+os_thread_ret_t
+DECLARE_THREAD(pm_buf_flush_list_cleaner_coordinator)(
+/*===============================================*/
+	void*	arg MY_ATTRIBUTE((unused)))
+			/*!< in: a dummy parameter required by
+			os_thread_create */
+{
+
+	my_thread_init();
+
+//#ifdef UNIV_PFS_THREAD
+//	pfs_register_thread(list_cleaner_thread_key);
+//#endif /* UNIV_PFS_THREAD */
+
+#ifdef UNIV_DEBUG_THREAD_CREATION
+	ib::info() << "list_cleaner thread running, id "
+		<< os_thread_pf(os_thread_get_curr_id());
+#endif /* UNIV_DEBUG_THREAD_CREATION */
+
+	pm_buf_list_cleaner_is_active = true;
+
+	os_event_wait(pm_buf_flush_event);
+	// wait until os_event_set(pm_buf_flush_event) ...
+
+	while (srv_shutdown_state == SRV_SHUTDOWN_NONE) {
+		//Do nothing now
+		if (srv_shutdown_state != SRV_SHUTDOWN_NONE) {
+			break;
+		}
+#ifdef UNIV_DEBUG
+		ut_d(pm_buf_flush_list_cleaner_disabled_loop());
+#endif
+	} //end while thread
+
+
+//thread_exit:
+	/* All worker threads are waiting for the event here,
+	and no more access to list_cleaner structure by them.
+	Wakes worker threads up just to make them exit. */
+	list_cleaner->is_running = false;
+	os_event_set(list_cleaner->is_requested);
+
+	pm_list_cleaner_close();
+
+	pm_buf_list_cleaner_is_active = false;
+
+	my_thread_end();
+
+	os_thread_exit();
+
+	OS_THREAD_DUMMY_RETURN;
+}
+
+/******************************************************************//**
+Worker thread of list_cleaner.
+@return a dummy parameter */
+extern "C"
+os_thread_ret_t
+DECLARE_THREAD(pm_buf_flush_list_cleaner_worker)(
+/*==========================================*/
+	void*	arg MY_ATTRIBUTE((unused)))
+			/*!< in: a dummy parameter required by
+			os_thread_create */
+{
+
+}
+
+#ifdef UNIV_DEBUG
+/** Loop used to disable page cleaner threads. */
+void
+pm_buf_flush_list_cleaner_disabled_loop(void)
+{
+	ut_ad(list_cleaner != NULL);
+
+	if (!pm_list_cleaner_disabled_debug) {
+		/* We return to avoid entering and exiting mutex. */
+		return;
+	}
+
+	mutex_enter(&list_cleaner->mutex);
+	list_cleaner->n_disabled_debug++;
+	mutex_exit(&list_cleaner->mutex);
+
+	while (pm_list_cleaner_disabled_debug
+	       && srv_shutdown_state == SRV_SHUTDOWN_NONE
+	       && list_cleaner->is_running) {
+
+		os_thread_sleep(100000); /* [A] */
+	}
+
+	mutex_enter(&list_cleaner->mutex);
+	list_cleaner->n_disabled_debug--;
+	mutex_exit(&list_cleaner->mutex);
+}
+
+/** Disables page cleaner threads (coordinator and workers).
+It's used by: SET GLOBAL innodb_page_cleaner_disabled_debug = 1 (0).
+@param[in]	thd		thread handle
+@param[in]	var		pointer to system variable
+@param[out]	var_ptr		where the formal string goes
+@param[in]	save		immediate result from check function */
+void
+pm_buf_flush_list_cleaner_disabled_debug_update(
+	THD*				thd,
+	struct st_mysql_sys_var*	var,
+	void*				var_ptr,
+	const void*			save)
+{
+	if (list_cleaner == NULL) {
+		return;
+	}
+
+	if (!*static_cast<const my_bool*>(save)) {
+		if (!pm_list_cleaner_disabled_debug) {
+			return;
+		}
+
+		pm_list_cleaner_disabled_debug = false;
+
+		/* Enable page cleaner threads. */
+		while (srv_shutdown_state == SRV_SHUTDOWN_NONE) {
+			mutex_enter(&list_cleaner->mutex);
+			const ulint n = list_cleaner->n_disabled_debug;
+			mutex_exit(&list_cleaner->mutex);
+			/* Check if all threads have been enabled, to avoid
+			problem when we decide to re-disable them soon. */
+			if (n == 0) {
+				break;
+			}
+		}
+		return;
+	}
+
+	if (pm_list_cleaner_disabled_debug) {
+		return;
+	}
+
+	pm_list_cleaner_disabled_debug = true;
+
+	while (srv_shutdown_state == SRV_SHUTDOWN_NONE) {
+		/* Workers are possibly sleeping on is_requested.
+
+		We have to wake them, otherwise they could possibly
+		have never noticed, that they should be disabled,
+		and we would wait for them here forever.
+
+		That's why we have sleep-loop instead of simply
+		waiting on some disabled_debug_event. */
+		os_event_set(list_cleaner->is_requested);
+
+		mutex_enter(&list_cleaner->mutex);
+
+		ut_ad(list_cleaner->n_disabled_debug
+		      <= srv_n_page_cleaners);
+
+		if (list_cleaner->n_disabled_debug
+		    == srv_n_page_cleaners) {
+
+			mutex_exit(&list_cleaner->mutex);
+			break;
+		}
+
+		mutex_exit(&list_cleaner->mutex);
+
+		os_thread_sleep(100000);
+	}
+}
+#endif /* UNIV_DEBUG */
+#endif //UNIV_PMEMOBJ_BUF

@@ -63,6 +63,20 @@ enum PMEM_BLOCK_STATE {
     PMEM_IN_USED_BLOCK = 2,
     PMEM_IN_FLUSH_BLOCK=3
 };
+enum pm_list_cleaner_state {
+	/** Not requested any yet.
+	Moved from FINISHED by the coordinator. */
+	LIST_CLEANER_STATE_NONE = 0,
+	/** Requested but not started flushing.
+	Moved from NONE by the coordinator. */
+	LIST_CLEANER_STATE_REQUESTED,
+	/** Flushing is on going.
+	Moved from REQUESTED by the worker. */
+	LIST_CLEANER_STATE_FLUSHING,
+	/** Flushing was finished.
+	Moved from FLUSHING by the worker. */
+	LIST_CLEANER_STATE_FINISHED
+};
 
 static inline int file_exists(char const *file);
 
