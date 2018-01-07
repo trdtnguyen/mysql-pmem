@@ -1011,7 +1011,9 @@ srv_init(void)
 		srv_buf_dump_event = os_event_create(0);
 
 		buf_flush_event = os_event_create("buf_flush_event");
-
+#if defined (UNIV_PMEMOBJ_BUF)
+		pm_buf_flush_event = os_event_create("pm_buf_flush_event");
+#endif
 		UT_LIST_INIT(srv_sys->tasks, &que_thr_t::queue);
 	}
 
@@ -1064,6 +1066,9 @@ srv_free(void)
 		os_event_destroy(srv_monitor_event);
 		os_event_destroy(srv_buf_dump_event);
 		os_event_destroy(buf_flush_event);
+#if defined (UNIV_PMEMOBJ_BUF)
+		os_event_destroy(pm_buf_flush_event);
+#endif
 	}
 
 	os_event_destroy(srv_buf_resize_event);

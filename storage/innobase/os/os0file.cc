@@ -90,6 +90,10 @@ bool	innodb_calling_exit;
 #include <mysqld.h>
 #include <mysql/service_mysql_keyring.h>
 
+#if defined (UNIV_PMEMOBJ_BUF)
+static FILE* df = fopen("debug.txt", "w");
+#endif
+
 /** Insert buffer segment id */
 static const ulint IO_IBUF_SEGMENT = 0;
 
@@ -2634,7 +2638,9 @@ LinuxAIOHandler::poll(fil_node_t** m1, void** m2, IORequest* request)
 			/* Partial IO, resubmit request for
 			remaining bytes to read/write */
 			err = resubmit(slot);
-
+#if defined(UNIV_PMEMOBJ_BUF)
+			printf("============> PMEM_DEBUG: resubmit...\n\n");
+#endif
 			if (err != DB_SUCCESS) {
 				break;
 			}
@@ -7571,7 +7577,6 @@ try_again:
 				AIO::get_segment_no_from_slot(array, slot));
 		}
 	} else if (type.is_write()) {
-
 		if (srv_use_native_aio) {
 			++os_n_file_writes;
 
@@ -7583,6 +7588,14 @@ try_again:
 			if (!array->linux_dispatch(slot)) {
 				goto err_exit;
 			}
+#if defined (UNIV_PMEMOBJ_BUF)
+				//if (type.is_pm_write()) {
+					//debug here
+				//	fprintf(df, "PMEM_DEBUG ===>\n ");
+				//	array->to_file(df);
+				//	printf("io_submit: name =  %s offset = %zu array n_reserved = %zu\n", name, offset, array->pending_io_count() );
+			//	}
+#endif //UNIV_PMEMOBJ_BUF
 #endif /* WIN_ASYNC_IO */
 
 		} else if (type.is_wake()) {

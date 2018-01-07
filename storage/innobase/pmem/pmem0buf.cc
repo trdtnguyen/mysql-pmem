@@ -51,7 +51,9 @@ PMEM_BUF* pm_pop_buf_alloc(PMEMobjpool* pop, const size_t size, const size_t pag
 	//align sizes to a pow of 2
 	assert(ut_is_2pow(page_size));
 	align_size = ut_uint64_align_up(size, page_size);
-	
+
+	pbuf->deb_file = fopen("debug.txt","w");
+
 	pbuf->size = align_size;
 	pbuf->page_size = page_size;
 	pbuf->type = BUF_TYPE;
@@ -132,11 +134,13 @@ pm_buf_list_init(PMEMobjpool* pop, PMEM_BUF* buf, const size_t total_size, const
 
 		plist->cur_pages = 0;
 		plist->is_flush = false;
-		plist->n_pending = 0;
+		plist->n_aio_pending = 0;
 		plist->max_pages = bucket_size / page_size;
 		plist->list_id = cur_bucket;
 		cur_bucket++;
 		plist->check = PMEM_AIO_CHECK;
+		TOID_ASSIGN(plist->next_list, OID_NULL);
+		TOID_ASSIGN(plist->prev_list, OID_NULL);
 		//plist->pext_list = NULL;
 		//TOID_ASSIGN(plist->pext_list, OID_NULL);
 	
@@ -158,8 +162,9 @@ pm_buf_list_init(PMEMobjpool* pop, PMEM_BUF* buf, const size_t total_size, const
 		pmemobj_persist(pop, &plist->cur_pages, sizeof(plist->cur_pages));
 		pmemobj_persist(pop, &plist->max_pages, sizeof(plist->max_pages));
 		pmemobj_persist(pop, &plist->is_flush, sizeof(plist->is_flush));
+		pmemobj_persist(pop, &plist->next_list, sizeof(plist->next_list));
 		//pmemobj_persist(pop, &plist->pext_list, sizeof(plist->pext_list));
-		pmemobj_persist(pop, &plist->n_pending, sizeof(plist->n_pending));
+		pmemobj_persist(pop, &plist->n_aio_pending, sizeof(plist->n_aio_pending));
 		pmemobj_persist(pop, &plist->check, sizeof(plist->check));
 		pmemobj_persist(pop, &plist->list_id, sizeof(plist->list_id));
 		pmemobj_persist(pop, &plist->next_free_block, sizeof(plist->next_free_block));
@@ -192,10 +197,12 @@ pm_buf_list_init(PMEMobjpool* pop, PMEM_BUF* buf, const size_t total_size, const
 		pfreelist->cur_pages = 0;
 		pfreelist->max_pages = bucket_size / page_size;
 		pfreelist->is_flush = false;
-		pfreelist->n_pending = 0;
+		pfreelist->n_aio_pending = 0;
 		pfreelist->list_id = cur_bucket;
 		cur_bucket++;
 		pfreelist->check = PMEM_AIO_CHECK;
+		TOID_ASSIGN(pfreelist->next_list, OID_NULL);
+		TOID_ASSIGN(pfreelist->prev_list, OID_NULL);
 	
 		//init pages in bucket
 		POBJ_ALLOC(pop, &pfreelist->arr, TOID(PMEM_BUF_BLOCK),
@@ -215,8 +222,10 @@ pm_buf_list_init(PMEMobjpool* pop, PMEM_BUF* buf, const size_t total_size, const
 		pmemobj_persist(pop, &pfreelist->cur_pages, sizeof(pfreelist->cur_pages));
 		pmemobj_persist(pop, &pfreelist->max_pages, sizeof(pfreelist->max_pages));
 		pmemobj_persist(pop, &pfreelist->is_flush, sizeof(pfreelist->is_flush));
+		pmemobj_persist(pop, &pfreelist->next_list, sizeof(pfreelist->next_list));
+		pmemobj_persist(pop, &pfreelist->prev_list, sizeof(pfreelist->prev_list));
 		//pmemobj_persist(pop, &pfreelist->pext_list, sizeof(pfreelist->pext_list));
-		pmemobj_persist(pop, &pfreelist->n_pending, sizeof(pfreelist->n_pending));
+		pmemobj_persist(pop, &pfreelist->n_aio_pending, sizeof(pfreelist->n_aio_pending));
 		pmemobj_persist(pop, &pfreelist->check, sizeof(pfreelist->check));
 		pmemobj_persist(pop, &pfreelist->list_id, sizeof(pfreelist->list_id));
 		pmemobj_persist(pop, &pfreelist->next_free_block, sizeof(pfreelist->next_free_block));
@@ -355,6 +364,11 @@ retry:
 			if (pfree_block->id.equals_to(page_id)) {
 				//overwrite the old page
 				pmemobj_rwlock_wrlock(pop, &pfree_block->lock);
+				if (pfree_block->sync != sync) {
+					phashlist->n_aio_pending += (pfree_block->sync - sync);
+
+				}
+				pfree_block->sync = sync;
 				pmemobj_memcpy_persist(pop, pdata + pfree_block->pmemaddr, src_data, page_size); 
 				//D_RW(free_block)->bpage = bpage;
 				pfree_block->sync = sync;
@@ -385,6 +399,9 @@ retry:
 
 	//D_RW(free_block)->bpage = bpage;
 	pfree_block->sync = sync;
+	//we only pending aio when flush list
+	if (!sync)
+		phashlist->n_aio_pending++;		
 
 	//D_RW(free_block)->id.copy_from(bpage->id);
 	pfree_block->id.copy_from(page_id);
@@ -410,7 +427,6 @@ retry:
 	if (phashlist->cur_pages >= phashlist->max_pages * PMEM_BUF_THRESHOLD) {
 		//(3) The hashlist is nearly full, flush it and assign a free list 
 		phashlist->is_flush = true;
-		phashlist->n_pending = phashlist->cur_pages;
 		//after set phashlist->is_flush to true, we can safely release the lock without worry other threads effect this thread work because there is a checking conditional at the beginning of this function
 		//we temporary unlock and then lock again the hashlist to avoid dead-lock in case the free_pool is empty and this thread wait for new free_list come to free_pool
 
@@ -438,14 +454,19 @@ get_free_list:
 
 		assert(!TOID_IS_NULL(first_list));
 
-		//Asign current hash list to new list
+		//Asign linked-list refs 
 		TOID_ASSIGN(D_RW(buf->buckets)[hashed], first_list.oid);
+		TOID_ASSIGN( D_RW(first_list)->next_list, hash_list.oid);
+		TOID_ASSIGN( D_RW(hash_list)->prev_list, first_list.oid);
+		
 
-	
 		pmemobj_rwlock_unlock(pop, &(D_RW(buf->free_pool)->lock));
 		pmemobj_rwlock_unlock(pop, &phashlist->lock);
-
-		pm_buf_flush_list(pop, buf, phashlist);
+		
+		//request a flush from worker thread
+		printf("request flush list_id %zu n_aio_pending %zu \n", phashlist->list_id, phashlist->n_aio_pending);
+		pm_lc_request(hash_list);
+		//pm_buf_flush_list(pop, buf, phashlist);
 
 	}
 	else {
@@ -465,67 +486,79 @@ get_free_list:
  *	@param[in] plist_new	pointer to the list that plist_new->pext is the list need to be written 
  * */
 void
-//pm_buf_write_list_to_datafile(PMEMobjpool* pop, PMEM_BUF* buf, TOID(PMEM_BUF_BLOCK_LIST) list_new, PMEM_BUF_BLOCK_LIST* plist) {
-//pm_buf_flush_list(PMEMobjpool* pop, PMEM_BUF* buf, TOID(PMEM_BUF_BLOCK_LIST)flush_list) {
-pm_buf_flush_list(PMEMobjpool* pop, PMEM_BUF* buf, PMEM_BUF_BLOCK_LIST* plist) {
+pm_buf_flush_list(PMEMobjpool* pop, PMEM_BUF* buf, PMEM_LIST_CLEANER_SLOT* slot) {
 
 	ulint i;
+	ulint count;
 
 	TOID(PMEM_BUF_BLOCK) flush_block;
 	PMEM_BUF_BLOCK* pblock;
-	//buf_page_t* bpage;
-
-	ulint type = IORequest::WRITE | IORequest::DO_NOT_WAKE;
-	IORequest request(type);
+	PMEM_BUF_BLOCK_LIST* plist;
 
 	char* pdata;
 	assert(pop);
 	assert(buf);
-	//assert(!TOID_IS_NULL(list_new));
-
-//	printf("\n   PMEM_DEBUG: begin pm_buf_flush_list %zu\n ", plist->list_id);
-
+	
+	plist = D_RW(slot->flush_list);
 	pdata = buf->p_align;
 
-	//We don't lock the flush_list here, that prevent AIO complete thread access to the flush_list
+	pmemobj_rwlock_wrlock(pop, &plist->lock);
+	count = 0;
 	
-	plist->n_flush = 0;
 
 	for (i = 0; i < plist->max_pages; i++) {
-	//POBJ_LIST_FOREACH(flush_block, &plist->head, entries) {
 		pblock = D_RW(D_RW(plist->arr)[i]);
 		//Becareful with this assert
 		//assert (pblock->state == PMEM_IN_USED_BLOCK);
-		if (pblock->state == PMEM_FREE_BLOCK) {
+
+		pmemobj_rwlock_wrlock(pop, &pblock->lock);
+		if (pblock->state == PMEM_FREE_BLOCK ||
+				pblock->state == PMEM_IN_FLUSH_BLOCK) {
 			//printf("!!!!!PMEM_WARNING: in list %zu don't write a FREE BLOCK, skip to next block\n", plist->list_id);
 			continue;
 		}
-		//pmemobj_rwlock_wrlock(pop, &pblock->lock);
+		//plist->n_flush++;
 		
 		assert( pblock->pmemaddr < buf->size);
 		UNIV_MEM_ASSERT_RW(pdata + pblock->pmemaddr, page_size);
 #if defined(UNIV_PMEMOBJ_BUF_DEBUG)
 	//	printf("PMEM_DEBUG: aio request page_id %zu space %zu pmemaddr %zu flush_list id=%zu\n", pblock->id.page_no(), pblock->id.space(), pblock->pmemaddr, plist->list_id);
 #endif
-			
-		//pblock->state = PMEM_FREE_BLOCK;	
-		plist->n_flush++;
+		assert(pblock->state == PMEM_IN_USED_BLOCK);	
+		pblock->state = PMEM_IN_FLUSH_BLOCK;	
+
+		//save the reference
+		pblock->pslot = slot;
+
+		ulint type = IORequest::PM_WRITE;
+		if (pblock->sync) {
+			type |= IORequest::DO_NOT_WAKE;
+			//the sync IO is not pending
+		}
+		else {
+			//debug
+			count++;
+		}
+
+
+		IORequest request(type);
 
 		dberr_t err = fil_io(request, 
 				pblock->sync, pblock->id, pblock->size, 0, pblock->size.physical(),
 				pdata + pblock->pmemaddr, D_RW(D_RW(plist->arr)[i]));
 
+		pmemobj_rwlock_unlock(pop, &pblock->lock);
+
 		if (err != DB_SUCCESS){
 			printf("PMEM_ERROR: fil_io() in pm_buf_list_write_to_datafile() space_id = %"PRIu32" page_id = %"PRIu32" size = %zu \n ", pblock->id.space(), pblock->id.page_no(), pblock->size.physical());
 			assert(0);
 		}
-		//pmemobj_rwlock_unlock(pop, &pblock->lock);
-
-		//if(plist->n_flush >= plist->cur_pages)
-		//	break;
 	}
+
 	//The aio complete thread will handle the post-processing of the flush list
-	printf("\n   PMEM_DEBUG: end pm_buf_flush_list %zu\n ", plist->list_id);
+	printf("\n   PMEM_DEBUG: end pm_buf_flush_list %zu  n_aio_pending %zu count %zu\n ", plist->list_id,  plist->n_aio_pending, count);
+
+	pmemobj_rwlock_unlock(pop, &plist->lock);
 }
 
 
@@ -543,6 +576,7 @@ pm_buf_read(PMEMobjpool* pop, PMEM_BUF* buf, const page_id_t page_id, const page
 	ulint hashed;
 	ulint i;
 
+	TOID(PMEM_BUF_BLOCK_LIST) cur_list;
 	PMEM_BUF_BLOCK_LIST* plist;
 	TOID(PMEM_BUF_BLOCK) iter;
 	TOID(PMEM_BUF_BLOCK) free_block;
@@ -555,21 +589,30 @@ pm_buf_read(PMEMobjpool* pop, PMEM_BUF* buf, const page_id_t page_id, const page
 	bytes_read = 0;
 
 	PMEM_HASH_KEY(hashed, page_id.fold(), PMEM_N_BUCKETS);
-	plist = D_RW(D_RW(buf->buckets)[hashed]);
-	assert(plist);
+	TOID_ASSIGN(cur_list, (D_RW(buf->buckets)[hashed]).oid);
+	//plist = D_RW(D_RW(buf->buckets)[hashed]);
+	//assert(plist);
 
 	pblock = NULL;
+	
+	while ( !TOID_IS_NULL(cur_list) ) {
+		plist = D_RW(cur_list);
+	//	pmemobj_rwlock_rdlock(pop, &plist->lock);
+		//Scan in this list
+		for (i = 0; i < plist->max_pages; i++) {
+			//accepted states: PMEM_IN_USED_BLOCK, PMEM_IN_FLUSH_BLOCK
+			if ( D_RW(D_RW(plist->arr)[i])->state != PMEM_FREE_BLOCK &&
+					D_RW(D_RW(plist->arr)[i])->id.equals_to(page_id)) {
+	//			pblock = D_RW(D_RW(plist->arr)[i]);
+				assert(pblock->size.equals_to(size));
+				break; // found the exist page
+			}
+		}//end for
+	//	pmemobj_rwlock_unlock(pop, &plist->lock);
 
-	for (i = 0; i < plist->max_pages; i++) {
-		if ( D_RW(D_RW(plist->arr)[i])->state != PMEM_FREE_BLOCK &&
-				D_RW(D_RW(plist->arr)[i])->id.equals_to(page_id)) {
-			pblock = D_RW(D_RW(plist->arr)[i]);
-			assert(pblock->size.equals_to(size));
-			break; // found the exist page
-		}
-
-	}//end for
-
+		//next list
+		TOID_ASSIGN(cur_list, (D_RW(cur_list)->next_list).oid);
+	} //end while
 		
 	if (pblock == NULL) {
 		// page is not exist
@@ -589,6 +632,8 @@ pm_buf_read(PMEMobjpool* pop, PMEM_BUF* buf, const page_id_t page_id, const page
 	bytes_read = pblock->size.physical();
 
 	pmemobj_rwlock_unlock(pop, &pblock->lock); 
+	//pmemobj_rwlock_unlock(pop, &plist->lock);
+
 	return bytes_read;
 }
 ///////////////////// DEBUG Funcitons /////////////////////////

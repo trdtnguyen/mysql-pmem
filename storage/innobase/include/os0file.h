@@ -550,11 +550,16 @@ public:
 		compression algorithm != NONE. Ignored if not set */
 		PUNCH_HOLE = 256,
 
+#if defined(UNIV_PMEMOBJ_BUF)
+		NO_COMPRESSION = 512,
+		PM_WRITE  = 1024
+#else
 		/** Force raw read, do not try to compress/decompress.
 		This can be used to force a read and write without any
 		compression e.g., for redo log, merge sort temporary files
 		and the truncate redo log. */
 		NO_COMPRESSION = 512
+#endif
 	};
 
 	/** Default constructor */
@@ -608,9 +613,19 @@ public:
 	bool is_write() const
 		MY_ATTRIBUTE((warn_unused_result))
 	{
+#if defined (UNIV_PMEMOBJ_BUF)
+		return((m_type & WRITE) == WRITE || is_pm_write());
+#else
 		return((m_type & WRITE) == WRITE);
+#endif
 	}
-
+#if defined (UNIV_PMEMOBJ_BUF)
+	bool is_pm_write() const
+		MY_ATTRIBUTE((warn_unused_result))
+	{
+		return((m_type & PM_WRITE) == PM_WRITE);
+	}
+#endif
 	/** @return true if it is a redo log write */
 	bool is_log() const
 		MY_ATTRIBUTE((warn_unused_result))

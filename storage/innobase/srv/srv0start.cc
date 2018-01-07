@@ -1312,6 +1312,9 @@ srv_shutdown_all_bg_threads()
 			}
 
 			os_event_set(buf_flush_event);
+#if defined (UNIV_PMEMOBJ_BUF)
+			os_event_set(pm_buf_flush_event);
+#endif
 
 			if (!buf_page_cleaner_is_active
 			    && os_aio_all_slots_free()) {
@@ -1917,7 +1920,8 @@ innobase_start_or_create_for_mysql(void)
 				gb_pmw->pbuf->size, D_RW(gb_pmw->pbuf->free_pool)->cur_lists);
 		//Check the page_size of the previous run with current run
 		if (gb_pmw->pbuf->page_size != UNIV_PAGE_SIZE) {
-			printf("PMEM_ERROR: the pmem buffer size = %zu is different with UNIV_PAGE_SIZE = %zu, you must use the same page_size!!!\n ");
+			printf("PMEM_ERROR: the pmem buffer size = %zu is different with UNIV_PAGE_SIZE = %zu, you must use the same page_size!!!\n ",
+					gb_pmw->pbuf->page_size, UNIV_PAGE_SIZE);
 			assert(0);
 		}
 			
@@ -1966,7 +1970,7 @@ innobase_start_or_create_for_mysql(void)
 
 	os_thread_create(pm_buf_flush_list_cleaner_coordinator,
 			 NULL, NULL);
-
+	printf("PMEM_INFO: ========>   create %d worker threads for pm\n", PMEM_N_BUCKETS);
 	for (i = 1; i < PMEM_N_BUCKETS; ++i) {
 		os_thread_create(pm_buf_flush_list_cleaner_worker,
 				 NULL, NULL);
@@ -2663,6 +2667,9 @@ files_checked:
 
 	/* wake main loop of page cleaner up */
 	os_event_set(buf_flush_event);
+#if defined(UNIV_PMEMOBJ_BUF)
+	os_event_set(pm_buf_flush_event);
+#endif
 
 	sum_of_data_file_sizes = srv_sys_space.get_sum_of_sizes();
 	ut_a(sum_of_new_sizes != ULINT_UNDEFINED);

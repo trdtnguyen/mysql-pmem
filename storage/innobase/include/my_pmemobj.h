@@ -180,6 +180,8 @@ struct __pmem_buf_block_t{
 	bool	sync;
 	PMEM_BLOCK_STATE			state;
 	TOID(PMEM_BUF_BLOCK_LIST)	list;
+	//reference to the flush thread (slot)
+	PMEM_LIST_CLEANER_SLOT*	pslot;
 	uint64_t		pmemaddr; /*
 						  the offset of the page in pmem
 						  note that the size of page can be got from page
@@ -191,7 +193,8 @@ struct __pmem_buf_block_list_t {
 	uint64_t				list_id;
 	TOID_ARRAY(TOID(PMEM_BUF_BLOCK))	arr;
 	//POBJ_LIST_HEAD(block_list, PMEM_BUF_BLOCK) head;
-	//TOID(PMEM_BUF_BLOCK_LIST) pext_list;
+	TOID(PMEM_BUF_BLOCK_LIST) next_list;
+	TOID(PMEM_BUF_BLOCK_LIST) prev_list;
 	TOID(PMEM_BUF_BLOCK) next_free_block;
 
 	POBJ_LIST_ENTRY(PMEM_BUF_BLOCK_LIST) list_entries;
@@ -199,10 +202,12 @@ struct __pmem_buf_block_list_t {
 	size_t				max_pages; //max number of pages
 	size_t				cur_pages; // current buffered pages
 	bool				is_flush;
-	size_t				n_pending; //number of pending flush
+	size_t				n_aio_pending; //number of pending flush
 	size_t				n_flush; //number of flush
 	int					check;
+	ulint				last_time;
 };
+
 struct __pmem_buf_free_pool {
 	PMEMrwlock			lock;
 	POBJ_LIST_HEAD(list_list, PMEM_BUF_BLOCK_LIST) head;
@@ -218,6 +223,7 @@ struct __pmem_buf {
 	bool is_new;
 	TOID(PMEM_BUF_FREE_POOL) free_pool;
 	TOID_ARRAY(TOID(PMEM_BUF_BLOCK_LIST)) buckets;
+	FILE* deb_file;
 };
 
 int pm_wrapper_buf_alloc(PMEM_WRAPPER* pmw, const size_t size, const size_t page_size);
@@ -237,8 +243,8 @@ size_t
 pm_buf_read(PMEMobjpool* pop, PMEM_BUF* buf, const page_id_t page_id, const page_size_t size, void* data);
 
 void
-//pm_buf_flush_list(PMEMobjpool* pop, PMEM_BUF* buf, TOID(PMEM_BUF_BLOCK_LIST)flush_list);
-pm_buf_flush_list(PMEMobjpool* pop, PMEM_BUF* buf, PMEM_BUF_BLOCK_LIST* plist);
+//pm_buf_flush_list(PMEMobjpool* pop, PMEM_BUF* buf, PMEM_BUF_BLOCK_LIST* plist);
+pm_buf_flush_list(PMEMobjpool* pop, PMEM_BUF* buf, PMEM_LIST_CLEANER_SLOT* slot);
 
 void
 pm_buf_write_aio_complete(PMEMobjpool* pop, PMEM_BUF* buf, TOID(PMEM_BUF_BLOCK)* ptoid_block);
@@ -258,6 +264,8 @@ void pm_buf_print_lists_info(PMEM_BUF* buf);
 
 struct __pmem_list_cleaner_slot {
 	pm_list_cleaner_state		state;
+	ulint						id;
+	//ulint						check;
 	ulint						n_pages_requested;
 					/*!< number of requested pages
 					for the slot */
@@ -270,7 +278,9 @@ struct __pmem_list_cleaner_slot {
 	ulint						flush_pass;
 					/*!< count to attempt flush_list
 					flushing */
-	ulint						flush_time;
+	ulint						last_time;
+
+	TOID(PMEM_BUF_BLOCK_LIST)		flush_list;
 };
 
 struct __pmem_list_cleaner {
@@ -310,11 +320,22 @@ pm_list_cleaner_close(void);
 
 void
 pm_lc_request(
-	ulint		min_n,
-	lsn_t		lsn_limit);
+	TOID(PMEM_BUF_BLOCK_LIST) flush_list);
+//void
+//pm_lc_request(
+//	ulint		min_n,
+//	lsn_t		lsn_limit);
 
 ulint
+pm_lc_resume(
+	TOID(PMEM_BUF_BLOCK_LIST) flush_list);
+
+void
 pm_lc_flush_slot(void);
+
+void
+//pm_handle_finished_slot(PMEM_LIST_CLEANER_SLOT* slot);
+pm_handle_finished_block(PMEM_BUF_BLOCK* pblock);
 
 bool
 pm_lc_wait_finished(

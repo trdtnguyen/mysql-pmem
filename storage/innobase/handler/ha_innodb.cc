@@ -400,6 +400,9 @@ static PSI_mutex_info all_innodb_mutexes[] = {
 	PSI_KEY(log_cmdq_mutex),
 	PSI_KEY(mutex_list_mutex),
 	PSI_KEY(page_cleaner_mutex),
+#if defined (UNIV_PMEMOBJ_BUF)
+	PSI_KEY(pm_list_cleaner_mutex),
+#endif
 	PSI_KEY(page_zip_stat_per_index_mutex),
 	PSI_KEY(purge_sys_pq_mutex),
 	PSI_KEY(recv_sys_mutex),
@@ -483,6 +486,9 @@ static PSI_thread_info	all_innodb_threads[] = {
 	PSI_KEY(io_read_thread),
 	PSI_KEY(io_write_thread),
 	PSI_KEY(page_cleaner_thread),
+#if defined (UNIV_PMEMOBJ_BUF)
+	PSI_KEY(pm_list_cleaner_thread),
+#endif
 	PSI_KEY(recv_writer_thread),
 	PSI_KEY(srv_error_monitor_thread),
 	PSI_KEY(srv_lock_timeout_thread),

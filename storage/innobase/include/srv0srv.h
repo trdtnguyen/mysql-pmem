@@ -479,6 +479,9 @@ extern mysql_pfs_key_t	io_log_thread_key;
 extern mysql_pfs_key_t	io_read_thread_key;
 extern mysql_pfs_key_t	io_write_thread_key;
 extern mysql_pfs_key_t	page_cleaner_thread_key;
+#if defined (UNIV_PMEMOBJ_BUF)
+extern mysql_pfs_key_t	pm_list_cleaner_thread_key;
+#endif
 extern mysql_pfs_key_t	recv_writer_thread_key;
 extern mysql_pfs_key_t	srv_error_monitor_thread_key;
 extern mysql_pfs_key_t	srv_lock_timeout_thread_key;

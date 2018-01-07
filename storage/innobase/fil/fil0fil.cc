@@ -5846,6 +5846,20 @@ fil_io(
 	}
 #else /* UNIV_HOTBACKUP */
 	/* Queue the aio request */
+#if defined(UNIV_PMEMOBJ_BUF)
+/*
+		if (message != NULL) {
+			PMEM_BUF_BLOCK* pblock = static_cast<PMEM_BUF_BLOCK*> (message);
+			if (pblock != NULL && pblock->check == PMEM_AIO_CHECK) {
+		TOID(PMEM_BUF_BLOCK_LIST) flush_list;
+		TOID_ASSIGN(flush_list, pblock->list.oid);
+		PMEM_BUF_BLOCK_LIST* pflush_list = D_RW(flush_list);
+				printf("==> os_aio(), file %s offset %zu list id %zu n_pending %zu / %zu page_id %zu space_id %zu  sync=%d \n", node->name, offset, pflush_list->list_id, pflush_list->n_pending, pflush_list->cur_pages, pblock->id.page_no(), pblock->id.space(), pblock->sync );
+			} 
+
+		}
+*/
+#endif
 	err = os_aio(
 		req_type,
 		mode, node->name, node->handle, buf, offset, len,
@@ -5964,64 +5978,13 @@ fil_aio_wait(
 		if (message != NULL) {
 #if defined (UNIV_PMEMOBJ_BUF)
 			PMEM_BUF_BLOCK* pblock = static_cast<PMEM_BUF_BLOCK*> (message);
+			PMEM_LIST_CLEANER_SLOT* pslot = static_cast<PMEM_LIST_CLEANER_SLOT*> (message);
 			if (pblock != NULL && pblock->check == PMEM_AIO_CHECK) {
-				//pmemobj_rwlock_wrlock(gb_pmw->pop, &pblock->lock);
-				//This AIO is called from pmem implementation
-				//buf_page_t* bpage = pblock->bpage;
-
-				//pmemobj_rwlock_wrlock(gb_pmw->pop, &pblock->lock);
-
-				TOID(PMEM_BUF_BLOCK_LIST) flush_list;
-				TOID_ASSIGN(flush_list, pblock->list.oid);
-				//PMEM_BUF_BLOCK_LIST* pflush_list = D_RW(flush_list);
-				PMEM_BUF_BLOCK_LIST* pflush_list = D_RW(pblock->list);
-
-				//pmemobj_rwlock_unlock(gb_pmw->pop, &pblock->lock);
-//#if defined (UNIV_PMEMOBJ_BUF_DEBUG)
-				//printf("PMEM_DEBUG: WAIT LOCK ... in fil_aio_wait(), page id %zd space %zd in list %zd n_pending = %zu n_flush = %zu \n", pblock->id.page_no(), pblock->id.space(), pflush_list->list_id, pflush_list->n_pending, pflush_list->n_flush); 
-//#endif	
-				//pmemobj_rwlock_unlock(gb_pmw->pop, &pblock->lock);
-				pmemobj_rwlock_wrlock(gb_pmw->pop, &pflush_list->lock);
-
-				pmemobj_rwlock_wrlock(gb_pmw->pop, &pblock->lock);
-				pblock->state = PMEM_FREE_BLOCK;
-				pmemobj_rwlock_unlock(gb_pmw->pop, &pblock->lock);
-				//if(!pblock->sync)
-				//buf_page_io_complete(pblock->bpage);
-
-				pflush_list->n_pending--;
-				//printf("PMEM_DEBUG: in fil_aio_wait(), page_id %zd space %zd list id: %zd, n_pending %zu cur_pages %zu n_flush %zu \n", pblock->id.page_no(), pblock->id.space(), pflush_list->list_id, pflush_list->n_pending, pflush_list->cur_pages, pflush_list->n_flush);
-				if (pflush_list->n_pending == 0) {
-					TOID(PMEM_BUF_BLOCK) iter;
-					//reset the list
-					//ulint i;
-					//for (i = 0; i < pflush_list->max_pages; i++) {
-					//	D_RW(D_RW(pflush_list->arr)[i])->state = PMEM_FREE_BLOCK;
-					//	D_RW(D_RW(pflush_list->arr)[i])->sync = false;
-					//}
-
-					pflush_list->cur_pages = 0;
-					pflush_list->is_flush = false;
-					//TOID_ASSIGN(pflush_list->next_free_block, POBJ_LIST_FIRST(&pflush_list->head).oid);
-
-					//we return this list to the free_pool
-					PMEM_BUF_FREE_POOL* pfree_pool;
-					pfree_pool = D_RW(gb_pmw->pbuf->free_pool);
-
-					//printf("PMEM_DEBUG: in fil_aio_wait(), try to lock free_pool list id: %zd, cur_lists in free_pool= %zd \n", pflush_list->list_id, pfree_pool->cur_lists);
-					pmemobj_rwlock_wrlock(gb_pmw->pop, &pfree_pool->lock);
-
-					POBJ_LIST_INSERT_TAIL(gb_pmw->pop, &pfree_pool->head, flush_list, list_entries);
-					pfree_pool->cur_lists++;
-
-					printf("PMEM_DEBUG: in fil_aio_wait(), reuse list id: %zd, cur_lists in free_pool= %zd \n", pflush_list->list_id, pfree_pool->cur_lists);
-					pmemobj_rwlock_unlock(gb_pmw->pop, &pfree_pool->lock);
-				}
-				pmemobj_rwlock_unlock(gb_pmw->pop, &pflush_list->lock);
-				//pmemobj_rwlock_unlock(gb_pmw->pop, &pblock->lock);
-
+				//pm_handle_finished_slot(pslot);
+				pm_handle_finished_block(pblock);
 			} //end if pmem aio
 			else {
+		//		printf("PMEM_DEBUG: pblock is not NULL but not from PMEM???\n");
 				buf_page_io_complete(static_cast<buf_page_t*>(message));
 			}
 #else //original

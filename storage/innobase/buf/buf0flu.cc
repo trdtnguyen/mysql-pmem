@@ -1084,12 +1084,15 @@ buf_flush_write_block_low(
 	// We capture the write from buffer pool flush
 	// EXCEPT: space 0
 	//if (bpage->id.page_no() != 0) {
+	//if(0) {
+	if(!sync) {
 		int ret = pm_buf_write(gb_pmw->pop, gb_pmw->pbuf, bpage->id, bpage->size,(void*)frame, sync);
 		assert(ret == PMEM_SUCCESS);
 		//After memcpy, We need this call to sync the buffer pool variables	
 		if (!sync)
 			buf_page_io_complete(bpage);
 		goto skip_write;
+	}
 //	}
 #endif /*UNIV_PMEMOBJ_BUF*/
 	/* Disable use of double-write buffer for temporary tablespace.
@@ -3867,18 +3870,22 @@ FlushObserver::flush()
 static PMEM_LIST_CLEANER* list_cleaner = NULL;
 static bool pm_buf_list_cleaner_is_active = false;
 /** Event to synchronise with the flushing. */
-static os_event_t	pm_buf_flush_event;
+os_event_t	pm_buf_flush_event;
 
 #ifdef UNIV_DEBUG
 static my_bool pm_list_cleaner_disabled_debug;
 #endif /* UNIV_DEBUG */
 
+#ifdef UNIV_PFS_THREAD
+mysql_pfs_key_t pm_list_cleaner_thread_key;
+#endif /* UNIV_PFS_THREAD */
 
 
 
 void
 pm_list_cleaner_init(void) {
 	ut_ad(list_cleaner == NULL);
+	ulint i;
 
 	list_cleaner = static_cast<PMEM_LIST_CLEANER*>(
 		ut_zalloc_nokey(sizeof(*list_cleaner)));
@@ -3893,7 +3900,12 @@ pm_list_cleaner_init(void) {
 	list_cleaner->slots = static_cast<PMEM_LIST_CLEANER_SLOT*>(
 		ut_zalloc_nokey(list_cleaner->n_slots
 				* sizeof(*list_cleaner->slots)));
-
+	
+	for (i = 0; i < list_cleaner->n_slots; i++) {
+		//list_cleaner->slots[i].check = PMEM_AIO_CHECK;
+		list_cleaner->slots[i].id = i;
+		TOID_ASSIGN(list_cleaner->slots[i].flush_list, OID_NULL);	
+	}
 	list_cleaner->is_running = true;
 }
 
@@ -3917,160 +3929,248 @@ pm_list_cleaner_close(void) {
 }
 
 /*
- *Call this function in while loop of coordinator thread
+ * Request the first idle list to flush the plist
  * */
 void
 pm_lc_request(
-	ulint		min_n,
-	lsn_t		lsn_limit)
+	TOID(PMEM_BUF_BLOCK_LIST) flush_list)
 {
-	if (min_n != ULINT_MAX) {
-		/* Ensure that flushing is spread evenly amongst the
-		buffer pool instances. When min_n is ULINT_MAX
-		we need to flush everything up to the lsn limit
-		so no limit here. */
-		min_n = (min_n + PMEM_N_BUCKETS - 1)
-			/ PMEM_N_BUCKETS;
-	}
-
+	ulint i;
 	mutex_enter(&list_cleaner->mutex);
-
-	ut_ad(list_cleaner->n_slots_requested == 0);
-	ut_ad(list_cleaner->n_slots_flushing == 0);
-	ut_ad(list_cleaner->n_slots_finished == 0);
-
-	list_cleaner->requested = (min_n > 0);
-	list_cleaner->lsn_limit = lsn_limit;
-
-	for (ulint i = 0; i < list_cleaner->n_slots; i++) {
+	
+	//find the first idle slot then request it to flush
+	for (i = 0; i < list_cleaner->n_slots; i++) {
 		PMEM_LIST_CLEANER_SLOT* slot = &list_cleaner->slots[i];
 
-		ut_ad(slot->state == LIST_CLEANER_STATE_NONE);
-
-		if (min_n == ULINT_MAX) {
-			slot->n_pages_requested = ULINT_MAX;
-		} else if (min_n == 0) {
-			slot->n_pages_requested = 0;
+		if(slot->state == LIST_CLEANER_STATE_NONE) {
+			//found the first idle thread
+			slot->n_pages_requested = D_RW(flush_list)->cur_pages;
+			slot->state = LIST_CLEANER_STATE_REQUESTED;
+			TOID_ASSIGN(slot->flush_list, flush_list.oid);
+			//flush_list->pslot = slot;
+			list_cleaner->requested = true;
+			break;
 		}
-
-		/* slot->n_pages_requested was already set by
-		list_cleaner_flush_pages_recommendation() */
-
-		slot->state = LIST_CLEANER_STATE_REQUESTED;
+	}
+	if (i >= list_cleaner->n_slots) {
+		//There is no idle thread to handle this flush
+		printf("PMEM_INFO: there is no idle thread to handle this flush \n");
+		assert(0);
+		//[TODO] sleep and retry
 	}
 
-	list_cleaner->n_slots_requested = list_cleaner->n_slots;
-	list_cleaner->n_slots_flushing = 0;
-	list_cleaner->n_slots_finished = 0;
-
+	list_cleaner->n_slots_requested++ ;
+	//trigger all worker waitting thread for this event
 	os_event_set(list_cleaner->is_requested);
 
 	mutex_exit(&list_cleaner->mutex);
 }
 /*
- * Flush a requested list to disk
- *
- * @return: current number of requested slots (pending)
+ * This function is called in the coordinator
+ * Resum the uncompleted requests
  * */
 ulint
-pm_lc_flush_slot(void) {
-
-	ulint	lru_tm = 0;
-	ulint	list_tm = 0;
-	int	lru_pass = 0;
-	int	list_pass = 0;
-
+pm_lc_resume(void
+	)
+{
+	ulint i;
+	ulint count;
+	PMEM_LIST_CLEANER_SLOT* slot;
 	mutex_enter(&list_cleaner->mutex);
+	
+	count = 0;	
+	if (list_cleaner->n_slots_flushing == 0){
+		//threre is nothing todo
+		goto already_finish;
+	}	
 
-	if (list_cleaner->n_slots_requested > 0) {
-		PMEM_LIST_CLEANER_SLOT*	slot = NULL;
-		ulint			i;
+	//find the first idle slot then request it to flush
+	for (i = 0; i < list_cleaner->n_slots; i++) {
+		slot = &list_cleaner->slots[i];
 
-		for (i = 0; i < list_cleaner->n_slots; i++) {
-			slot = &list_cleaner->slots[i];
-
-			if (slot->state == LIST_CLEANER_STATE_REQUESTED) {
-				break;
+		if(slot->state == LIST_CLEANER_STATE_FLUSHING) {
+			if (slot->n_pages_requested == 0){
+				printf("PMEM_INFO: !!! slot is out of state");
+				slot->state = LIST_CLEANER_STATE_FINISHED;
+				continue;
 			}
-		}
+			//check the time
+			if (ut_time_ms() - slot->last_time > 100000) {
+				printf("====== ====== > PMEM_DEBUG: resume slot %zu n_pages remains %zu\n", slot->id, slot->n_pages_requested);
+				count++;
+				//flush_list->pslot = slot;
+				pm_buf_flush_list(gb_pmw->pop, gb_pmw->pbuf, slot);
+			}
+			//give the slot thread a litte bit more time to flush
 
-		/* slot should be found because
-		list_cleaner->n_slots_requested > 0 */
-		ut_a(i < list_cleaner->n_slots);
-
-		buf_pool_t* buf_pool = buf_pool_from_array(i);
-
-		list_cleaner->n_slots_requested--;
-		list_cleaner->n_slots_flushing++;
-		slot->state = LIST_CLEANER_STATE_FLUSHING;
-
-		if (list_cleaner->n_slots_requested == 0) {
-			os_event_reset(list_cleaner->is_requested);
-		}
-
-		if (!list_cleaner->is_running) {
-			//slot->n_flushed_lru = 0;
-			slot->n_flushed_list = 0;
-			goto finish_mutex;
-		}
-
-		mutex_exit(&list_cleaner->mutex);
-
-		lru_tm = ut_time_ms();
-
-		/* Flush pages from end of LRU if required */
-		//slot->n_flushed_lru = buf_flush_LRU_list(buf_pool);
-
-		lru_tm = ut_time_ms() - lru_tm;
-		lru_pass++;
-
-		if (!list_cleaner->is_running) {
-			slot->n_flushed_list = 0;
-			goto finish;
-		}
-
-		/* Flush pages from flush_list if required */
-		if (list_cleaner->requested) {
-
-			list_tm = ut_time_ms();
-			//[TODO] do your flush code here
-			//slot->succeeded_list = buf_flush_do_batch(
-			//	buf_pool, BUF_FLUSH_LIST,
-			//	slot->n_pages_requested,
-			//	list_cleaner->lsn_limit,
-			//	&slot->n_flushed_list);
-
-			list_tm = ut_time_ms() - list_tm;
-			list_pass++;
-		} else {
-			slot->n_flushed_list = 0;
-			slot->succeeded_list = true;
-		}
-finish:
-		mutex_enter(&list_cleaner->mutex);
-finish_mutex:
-		list_cleaner->n_slots_flushing--;
-		list_cleaner->n_slots_finished++;
-		slot->state = LIST_CLEANER_STATE_FINISHED;
-
-		//slot->flush_lru_time += lru_tm;
-		slot->flush_time += list_tm;
-		//slot->flush_lru_pass += lru_pass;
-		slot->flush_pass += list_pass;
-
-		if (list_cleaner->n_slots_requested == 0
-		    && list_cleaner->n_slots_flushing == 0) {
-			os_event_set(list_cleaner->is_finished);
 		}
 	}
 
-	ulint	ret = list_cleaner->n_slots_requested;
-
+already_finish:
 	mutex_exit(&list_cleaner->mutex);
-
-	return(ret);
+	return count;
 }
 
+/*
+ * Flush a requested list to disk
+ * A worker thread wait for list_cleaner_is_requested
+ * call this function to flush a list
+ *
+ * @return: current number of requested slots (pending)
+ * */
+void
+pm_lc_flush_slot(void) {
+
+	mutex_enter(&list_cleaner->mutex);
+	if (list_cleaner->n_slots_requested == 0) {
+		mutex_exit(&list_cleaner->mutex);
+	   return ;
+	}
+
+	PMEM_LIST_CLEANER_SLOT*	slot = NULL;
+	ulint			i;
+	
+	//find the first requested slot
+	for (i = 0; i < list_cleaner->n_slots; i++) {
+		slot = &list_cleaner->slots[i];
+
+		if (slot->state == LIST_CLEANER_STATE_REQUESTED) {
+			break;
+		}
+	}
+
+	/* slot should be found because
+	   list_cleaner->n_slots_requested > 0 */
+	ut_a(i < list_cleaner->n_slots);
+
+	list_cleaner->n_slots_requested--;
+	list_cleaner->n_slots_flushing++;
+	slot->state = LIST_CLEANER_STATE_FLUSHING;
+	slot->last_time = ut_time_ms();
+
+	if (list_cleaner->n_slots_requested == 0) {
+		//if this slot is the last requested slot, call os_event_reset() so that the worker thread start waiting
+		os_event_reset(list_cleaner->is_requested);
+	}
+
+	// Now we got a requested slot
+
+	/* Flush pages from end of LRU if required */
+	//slot->n_flushed_lru = buf_flush_LRU_list(buf_pool);
+	pm_buf_flush_list(gb_pmw->pop, gb_pmw->pbuf, slot);
+
+	mutex_exit(&list_cleaner->mutex);
+}
+
+/*
+ *This function is called from aio complete (fil_aio_wait)
+ * */
+void
+//pm_handle_finished_slot(PMEM_LIST_CLEANER_SLOT* slot) {
+pm_handle_finished_block(PMEM_BUF_BLOCK* pblock){
+
+	//(1) handle the flush_list
+	PMEM_LIST_CLEANER_SLOT* slot;	
+	TOID(PMEM_BUF_BLOCK_LIST) flush_list;
+	//TOID_ASSIGN(flush_list, slot->flush_list.oid);
+
+	TOID_ASSIGN(flush_list, pblock->list.oid);
+	PMEM_BUF_BLOCK_LIST* pflush_list = D_RW(flush_list);
+
+	assert(pflush_list);
+	slot = pblock->pslot;
+
+	pmemobj_rwlock_wrlock(gb_pmw->pop, &pflush_list->lock);
+	
+	//This is important state change	
+//	pmemobj_rwlock_wrlock(gb_pmw->pop, &pblock->lock);
+//	pblock->state =	PMEM_FREE_BLOCK; 
+//	pmemobj_rwlock_unlock(gb_pmw->pop, &pblock->lock);
+
+	//save the last time aio complete on this list
+	slot->last_time = ut_time_ms();
+
+	pflush_list->n_aio_pending--;
+	slot->n_pages_requested--;
+
+	//printf("PMEM_DEBUG aio FINISHED slot_id = %zu n_page_requested = %zu flush_list id = %zu n_pending = %zu/%zu page_id %zu space_id %zu \n",
+	//		slot->id, slot->n_pages_requested, pflush_list->list_id, pflush_list->n_aio_pending, pflush_list->cur_pages, pblock->id.page_no(), pblock->id.space());
+	if (pflush_list->n_aio_pending == 0) {
+		//Now all pages in this list are persistent in disk
+		
+		//(1) Reset blocks in the list
+		ulint i;
+		for (i = 0; i < pflush_list->max_pages; i++) {
+			D_RW(D_RW(pflush_list->arr)[i])->state = PMEM_FREE_BLOCK;
+			D_RW(D_RW(pflush_list->arr)[i])->sync = false;
+		}
+
+		pflush_list->cur_pages = 0;
+		pflush_list->is_flush = false;
+		
+		// (2) Remove this list from the doubled-linked list
+		
+		assert( !TOID_IS_NULL(pflush_list->prev_list) );
+		pmemobj_rwlock_wrlock(gb_pmw->pop, &D_RW(pflush_list->prev_list)->lock);
+
+		PMEM_BUF_BLOCK_LIST* pprev_list = D_RW(pflush_list->prev_list);
+
+		TOID_ASSIGN( D_RW(pflush_list->prev_list)->next_list, pflush_list->next_list.oid);
+
+		if (!TOID_IS_NULL(pflush_list->next_list) ) {
+		pmemobj_rwlock_wrlock(gb_pmw->pop, &D_RW(pflush_list->next_list)->lock);
+
+		PMEM_BUF_BLOCK_LIST* pnext_list = D_RW(pflush_list->next_list);
+
+		TOID_ASSIGN(D_RW(pflush_list->next_list)->prev_list, pflush_list->prev_list.oid);
+
+		pmemobj_rwlock_unlock(gb_pmw->pop, &D_RW(pflush_list->next_list)->lock);
+		}
+
+		pmemobj_rwlock_unlock(gb_pmw->pop, &D_RW(pflush_list->prev_list)->lock);
+		
+		TOID_ASSIGN(pflush_list->next_list, OID_NULL);
+		TOID_ASSIGN(pflush_list->prev_list, OID_NULL);
+
+
+		// (3) we return this list to the free_pool
+		PMEM_BUF_FREE_POOL* pfree_pool;
+		pfree_pool = D_RW(gb_pmw->pbuf->free_pool);
+
+		//printf("PMEM_DEBUG: in fil_aio_wait(), try to lock free_pool list id: %zd, cur_lists in free_pool= %zd \n", pflush_list->list_id, pfree_pool->cur_lists);
+		pmemobj_rwlock_wrlock(gb_pmw->pop, &pfree_pool->lock);
+
+		POBJ_LIST_INSERT_TAIL(gb_pmw->pop, &pfree_pool->head, flush_list, list_entries);
+		pfree_pool->cur_lists++;
+
+		printf("PMEM_DEBUG: in fil_aio_wait(), reuse list id: %zd, slot id %zu cur_lists in free_pool= %zd \n", pflush_list->list_id, slot->id, pfree_pool->cur_lists);
+		pmemobj_rwlock_unlock(gb_pmw->pop, &pfree_pool->lock);
+
+		// (4) reset the slot
+
+		mutex_enter(&list_cleaner->mutex);
+
+		list_cleaner->n_slots_flushing--;
+		
+		//reset slot	
+		slot->state = LIST_CLEANER_STATE_NONE;
+		slot->n_pages_requested = 0;
+		//we don't use the is_finished event
+		//if (list_cleaner->n_slots_requested == 0
+		//		&& list_cleaner->n_slots_flushing == 0) {
+			//trigger the 
+		//	os_event_set(list_cleaner->is_finished);
+		//}
+
+		mutex_exit(&list_cleaner->mutex);
+	}
+	//the list has some unfinished aio	
+	pmemobj_rwlock_unlock(gb_pmw->pop, &pflush_list->lock);
+
+}
+/*
+ * this function wait until at least one request finish
+ */
 bool
 pm_lc_wait_finished(
 	ulint*	n_flushed_list) {
@@ -4083,24 +4183,15 @@ pm_lc_wait_finished(
 
 	mutex_enter(&list_cleaner->mutex);
 
-	ut_ad(list_cleaner->n_slots_requested == 0);
-	ut_ad(list_cleaner->n_slots_flushing == 0);
-	ut_ad(list_cleaner->n_slots_finished == list_cleaner->n_slots);
-
 	for (ulint i = 0; i < list_cleaner->n_slots; i++) {
 		PMEM_LIST_CLEANER_SLOT* slot = &list_cleaner->slots[i];
 
-		ut_ad(slot->state == LIST_CLEANER_STATE_FINISHED);
-
-		*n_flushed_list += slot->n_flushed_list;
-		all_succeeded &= slot->succeeded_list;
-
-		slot->state = LIST_CLEANER_STATE_NONE;
-
-		slot->n_pages_requested = 0;
+		if (slot->state == LIST_CLEANER_STATE_FINISHED){
+			slot->state = LIST_CLEANER_STATE_NONE;
+			slot->n_pages_requested = 0;
+			list_cleaner->n_slots_finished-- ;
+		}
 	}
-
-	list_cleaner->n_slots_finished = 0;
 
 	os_event_reset(list_cleaner->is_finished);
 
@@ -4147,30 +4238,50 @@ DECLARE_THREAD(pm_buf_flush_list_cleaner_coordinator)(
 			os_thread_create */
 {
 
+
 	my_thread_init();
 
-//#ifdef UNIV_PFS_THREAD
-//	pfs_register_thread(list_cleaner_thread_key);
-//#endif /* UNIV_PFS_THREAD */
+#ifdef UNIV_PFS_THREAD
+	pfs_register_thread(pm_list_cleaner_thread_key);
+#endif /* UNIV_PFS_THREAD */
 
 #ifdef UNIV_DEBUG_THREAD_CREATION
 	ib::info() << "list_cleaner thread running, id "
 		<< os_thread_pf(os_thread_get_curr_id());
 #endif /* UNIV_DEBUG_THREAD_CREATION */
 
+#ifdef UNIV_LINUX
+	/* linux might be able to set different setting for each thread.
+	worth to try to set high priority for page cleaner threads */
+	if (buf_flush_page_cleaner_set_priority(
+		buf_flush_page_cleaner_priority)) {
+
+		ib::info() << "pm_list_cleaner coordinator priority: "
+			<< buf_flush_page_cleaner_priority;
+	} else {
+		ib::info() << "If the mysqld execution user is authorized,"
+		" page cleaner thread priority can be changed."
+		" See the man page of setpriority().";
+	}
+#endif /* UNIV_LINUX */
+
 	pm_buf_list_cleaner_is_active = true;
 
-	os_event_wait(pm_buf_flush_event);
-	// wait until os_event_set(pm_buf_flush_event) ...
+	ulint ret;
 
 	while (srv_shutdown_state == SRV_SHUTDOWN_NONE) {
-		//Do nothing now
-		if (srv_shutdown_state != SRV_SHUTDOWN_NONE) {
-			break;
-		}
+		os_thread_sleep(10000);
+
+		// we trigger when the server start
 #ifdef UNIV_DEBUG
 		ut_d(pm_buf_flush_list_cleaner_disabled_loop());
 #endif
+		if (srv_shutdown_state != SRV_SHUTDOWN_NONE) {
+			break;
+		}
+		//do resume
+	//	ret = pm_lc_resume();
+		//sleep
 	} //end while thread
 
 
@@ -4204,6 +4315,45 @@ DECLARE_THREAD(pm_buf_flush_list_cleaner_worker)(
 			os_thread_create */
 {
 
+	my_thread_init();
+
+	mutex_enter(&list_cleaner->mutex);
+	list_cleaner->n_workers++;
+	mutex_exit(&list_cleaner->mutex);
+
+#ifdef UNIV_LINUX
+	/* linux might be able to set different setting for each thread
+	worth to try to set high priority for page cleaner threads */
+	if (buf_flush_page_cleaner_set_priority(
+		buf_flush_page_cleaner_priority)) {
+
+		ib::info() << "======>> PMEM_INFO page_cleaner worker priority: "
+			<< buf_flush_page_cleaner_priority;
+	}
+#endif /* UNIV_LINUX */
+
+	while (true) {
+		os_event_wait(list_cleaner->is_requested);
+		//all PMEM_N_BUCKET worker threads wait for os_event_set() ...
+
+		ut_d(pm_buf_flush_list_cleaner_disabled_loop());
+
+		if (!list_cleaner->is_running) {
+			break;
+		}
+		//flush the first requested list to disk
+		pm_lc_flush_slot();
+	}
+
+	mutex_enter(&list_cleaner->mutex);
+	list_cleaner->n_workers--;
+	mutex_exit(&list_cleaner->mutex);
+
+	my_thread_end();
+
+	os_thread_exit();
+
+	OS_THREAD_DUMMY_RETURN;
 }
 
 #ifdef UNIV_DEBUG
