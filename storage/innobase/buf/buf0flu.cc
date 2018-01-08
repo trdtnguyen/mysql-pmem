@@ -1086,11 +1086,11 @@ buf_flush_write_block_low(
 	//if (bpage->id.page_no() != 0) {
 	//if(0) {
 	if(!sync) {
-		int ret = pm_buf_write(gb_pmw->pop, gb_pmw->pbuf, bpage->id, bpage->size,(void*)frame, sync);
+		int ret = pm_buf_write(gb_pmw->pop, gb_pmw->pbuf, bpage->id, bpage->size, frame, sync);
 		assert(ret == PMEM_SUCCESS);
 		//After memcpy, We need this call to sync the buffer pool variables	
 		if (!sync)
-			buf_page_io_complete(bpage);
+			assert(buf_page_io_complete(bpage));
 		goto skip_write;
 	}
 //	}

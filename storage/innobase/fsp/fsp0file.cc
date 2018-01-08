@@ -338,9 +338,11 @@ Datafile::read_first_page(bool read_only_mode)
 
 		ulint	n_read = 0;
 #if defined (UNIV_PMEMOBJ_BUF)
-		 size_t read_bytes=  pm_buf_read(gb_pmw->pop, gb_pmw->pbuf,
-				 page_id_t(0,0), page_size_t(UNIV_PAGE_SIZE, UNIV_PAGE_SIZE, false), m_first_page);
-		 if (read_bytes > 0) {
+		 //size_t read_bytes=  pm_buf_read(gb_pmw->pop, gb_pmw->pbuf,
+		 const PMEM_BUF_BLOCK* pblock =  pm_buf_read(gb_pmw->pop, gb_pmw->pbuf,
+				 page_id_t(0,0), page_size_t(UNIV_PAGE_SIZE, UNIV_PAGE_SIZE, false), m_first_page, true);
+		 //if (read_bytes > 0) {
+		 if (pblock) {
 			 err = DB_SUCCESS;
 			 n_read = page_size;
 		 }

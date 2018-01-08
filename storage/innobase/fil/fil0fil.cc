@@ -5815,19 +5815,32 @@ fil_io(
 
 	dberr_t	err;
 #if defined (UNIV_PMEMOBJ_BUF)
-	if (req_type.is_read() && !req_type.is_log()) {
-		size_t read_bytes=  pm_buf_read(gb_pmw->pop, gb_pmw->pbuf,
-				page_id, page_size, buf);
+	//if (!req_type.is_log()) {
+	//	if (req_type.is_read()) {
+	//		size_t read_bytes=  pm_buf_read(gb_pmw->pop, gb_pmw->pbuf,
+	//				page_id, page_size, buf);
 
-		if (read_bytes > 0) {
-			err = DB_SUCCESS;
-			if (!sync) {
-				//this call is necessary to notify the buffer pool the read ID complete
-				buf_page_io_complete(static_cast<buf_page_t*>(message));
-			}
-			goto skip_read;
-		}
-	}
+	//		if (read_bytes > 0) {
+	//			err = DB_SUCCESS;
+	//			if (!sync) {
+	//				//this call is necessary to notify the buffer pool the read ID complete
+	//				buf_page_io_complete(static_cast<buf_page_t*>(message));
+	//			}
+	//			goto skip_io;
+	//		}
+	//	}
+		//else if (req_type.is_write()) {
+		//	if(!sync) {
+		//		int ret = pm_buf_write(gb_pmw->pop, gb_pmw->pbuf,
+		//			   	page_id, page_size,buf, sync);
+		//		assert(ret == PMEM_SUCCESS);
+		//		//After memcpy, We need this call to sync the buffer pool variables	
+		//		if (!sync)
+		//			buf_page_io_complete(static_cast<buf_page_t*>(message));
+		//		goto skip_io;
+		//	}
+		//}
+	//}
 #endif //UNIV_PMEMOBJ_BUF
 
 #ifdef UNIV_HOTBACKUP
@@ -5870,7 +5883,7 @@ fil_io(
 #endif /* UNIV_HOTBACKUP */
 
 #if defined (UNIV_PMEMOBJ_BUF)
-skip_read:
+skip_io:
 #endif //UNIV_PMEMOBJ_BUF
 
 #if defined (UNIV_NVM_LOG) 

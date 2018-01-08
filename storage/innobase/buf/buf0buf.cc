@@ -5712,6 +5712,9 @@ buf_page_io_complete(
 				"the page, read in are "
 				<< page_id_t(read_space_id, read_page_no)
 				<< ", should be " << bpage->id;
+#if defined (UNIV_PMEMOBJ_BUF)
+			return 0;
+#endif
 		}
 
 		compressed_page = Compression::is_compressed_page(frame);

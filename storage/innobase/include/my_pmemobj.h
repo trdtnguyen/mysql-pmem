@@ -219,12 +219,15 @@ struct __pmem_buf {
 	size_t page_size;
 	PMEM_OBJ_TYPES type;	
 	PMEMoid  data; //pmem data
-	char* p_align; //align 
+	//char* p_align; //align 
+	byte* p_align; //align 
 	bool is_new;
 	TOID(PMEM_BUF_FREE_POOL) free_pool;
 	TOID_ARRAY(TOID(PMEM_BUF_BLOCK_LIST)) buckets;
 	FILE* deb_file;
 };
+
+bool pm_check_io(byte* frame, page_id_t  page_id);
 
 int pm_wrapper_buf_alloc(PMEM_WRAPPER* pmw, const size_t size, const size_t page_size);
 PMEM_BUF* pm_pop_get_buf(PMEMobjpool* pop);
@@ -237,10 +240,10 @@ pm_buf_list_init(PMEMobjpool* pop, PMEM_BUF* buf, const size_t size, const size_
 
 int
 //pm_buf_write(PMEMobjpool* pop, PMEM_BUF* buf, buf_page_t* bpage, void* data, bool sync);
-pm_buf_write(PMEMobjpool* pop, PMEM_BUF* buf, page_id_t page_id, page_size_t size, void* src_data, bool sync);
+pm_buf_write(PMEMobjpool* pop, PMEM_BUF* buf, page_id_t page_id, page_size_t size, byte* src_data, bool sync);
 
-size_t
-pm_buf_read(PMEMobjpool* pop, PMEM_BUF* buf, const page_id_t page_id, const page_size_t size, void* data);
+const PMEM_BUF_BLOCK*
+pm_buf_read(PMEMobjpool* pop, PMEM_BUF* buf, const page_id_t page_id, const page_size_t size, byte* data, bool sync);
 
 void
 //pm_buf_flush_list(PMEMobjpool* pop, PMEM_BUF* buf, PMEM_BUF_BLOCK_LIST* plist);

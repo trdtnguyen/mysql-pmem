@@ -1926,10 +1926,11 @@ innobase_start_or_create_for_mysql(void)
 		}
 			
 		//We need to re-align the p_align
-		char* p;
-		p = static_cast<char*> (pmemobj_direct(gb_pmw->pbuf->data));
+		byte* p;
+		p = static_cast<byte*> (pmemobj_direct(gb_pmw->pbuf->data));
 		assert(p);
-		gb_pmw->pbuf->p_align = static_cast<char*> (ut_align(p, UNIV_PAGE_SIZE));
+		//gb_pmw->pbuf->p_align = static_cast<char*> (ut_align(p, UNIV_PAGE_SIZE));
+		gb_pmw->pbuf->p_align = static_cast<byte*> (ut_align(p, UNIV_PAGE_SIZE));
 	}
 	//[TODO] Recovery handler
 #endif /* UNIV_PMEMOBJ_BUF */

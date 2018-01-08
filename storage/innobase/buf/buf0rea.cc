@@ -193,23 +193,33 @@ buf_read_page_low(
 			sync = true;
 		}
 	);
-//#if defined (UNIV_PMEMOBJ_BUF)
-//	size_t read_bytes=  pm_buf_read(gb_pmw->pop, gb_pmw->pbuf, page_id, page_size, dst);
-//	if (read_bytes > 0) {
-//		if (sync) {
-//			thd_wait_end(NULL);
-//		}
-		//Since we don't use AIO in pm_buf_read, we call buf_page_io_complete() 
-		//regardless of sync value	
-//		if (!buf_page_io_complete(bpage)) {
-//			return(0);
-//		}
-//		if (!sync)
-//			printf("PMEM_DEBUG: in buf_read_page_low sync is FALSE!!!! \n");
-//	}
-//	else {
-	// if the page_id is not in pmem buffer, read it from disk as normal
-//#endif /*UNIV_PMEMOBJ_BUF*/
+#if defined (UNIV_PMEMOBJ_BUF)
+	//size_t read_bytes=  pm_buf_read(gb_pmw->pop, gb_pmw->pbuf, page_id, page_size, (byte*)dst, sync);
+	const PMEM_BUF_BLOCK* pblock=  pm_buf_read(gb_pmw->pop, gb_pmw->pbuf, page_id, page_size, (byte*)dst, sync);
+	//if (read_bytes > 0) {
+	if (pblock) {
+		if (sync) {
+			thd_wait_end(NULL);
+			/* The i/o is already completed when we arrive from
+			   fil_read */
+			if (!buf_page_io_complete(bpage)) {
+				ib::error() <<
+				"!!!   PMEM_BUF ERROR buf_page_io_complete pblock->id=" << pblock->id 
+				<< ", pmemaddr=" << pblock->pmemaddr 
+				<< ", block_state= " << pblock->state
+				<< ", bpage->id= " << bpage->id 
+				<< ", page_id= " << page_id;
+				assert(0);
+				return(0);
+			}
+		}
+		else {
+			assert(buf_page_io_complete(bpage)) ;
+		}
+	}
+	else {
+  // if the page_id is not in pmem buffer, read it from disk as normal
+#endif /*UNIV_PMEMOBJ_BUF*/
 	IORequest	request(type | IORequest::READ);
 
 	*err = fil_io(
@@ -248,9 +258,10 @@ buf_read_page_low(
 			return(0);
 		}
 	}
-//#if defined (UNIV_PMEMOBJ_BUF)
-//	}//end if
-//#endif 
+
+#if defined (UNIV_PMEMOBJ_BUF)
+	} //end else
+#endif
 	return(1);
 }
 
