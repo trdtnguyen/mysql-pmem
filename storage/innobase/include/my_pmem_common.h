@@ -28,6 +28,7 @@
 
 //wait for a aio write, call when there is no free block
 #define PMEM_WAIT_FOR_WRITE 200
+#define PMEM_WAIT_FOR_FREE_LIST 10000
 
 //error handler
 #define PMEM_SUCCESS 0

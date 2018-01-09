@@ -1637,7 +1637,7 @@ log_complete_checkpoint(void)
 	MONITOR_SET(MONITOR_LSN_CHECKPOINT_AGE,
 		    log_sys->lsn - log_sys->last_checkpoint_lsn);
 #if defined (UNIV_PMEMOBJ_BUF)
-	printf("====>  PMEM_DEBUG: log_complete_checkpoint()\n ");
+//	printf("====>  PMEM_DEBUG: log_complete_checkpoint()\n ");
 #endif
 	DBUG_PRINT("ib_log", ("checkpoint ended at " LSN_PF
 			      ", flushed to " LSN_PF,

@@ -3936,6 +3936,7 @@ pm_lc_request(
 	TOID(PMEM_BUF_BLOCK_LIST) flush_list)
 {
 	ulint i;
+get_free_thread:
 	mutex_enter(&list_cleaner->mutex);
 	
 	//find the first idle slot then request it to flush
@@ -3955,8 +3956,12 @@ pm_lc_request(
 	if (i >= list_cleaner->n_slots) {
 		//There is no idle thread to handle this flush
 		printf("PMEM_INFO: there is no idle thread to handle this flush \n");
-		assert(0);
+		//assert(0);
 		//[TODO] sleep and retry
+		os_thread_sleep(PMEM_WAIT_FOR_FREE_LIST);
+
+		mutex_exit(&list_cleaner->mutex);
+		goto get_free_thread;
 	}
 
 	list_cleaner->n_slots_requested++ ;
@@ -3999,7 +4004,7 @@ pm_lc_resume(void
 				printf("====== ====== > PMEM_DEBUG: resume slot %zu n_pages remains %zu\n", slot->id, slot->n_pages_requested);
 				count++;
 				//flush_list->pslot = slot;
-				pm_buf_flush_list(gb_pmw->pop, gb_pmw->pbuf, slot);
+				pm_buf_flush_list_v2(gb_pmw->pop, gb_pmw->pbuf, slot);
 			}
 			//give the slot thread a litte bit more time to flush
 
@@ -4057,7 +4062,7 @@ pm_lc_flush_slot(void) {
 
 	/* Flush pages from end of LRU if required */
 	//slot->n_flushed_lru = buf_flush_LRU_list(buf_pool);
-	pm_buf_flush_list(gb_pmw->pop, gb_pmw->pbuf, slot);
+	pm_buf_flush_list_v2(gb_pmw->pop, gb_pmw->pbuf, slot);
 
 	mutex_exit(&list_cleaner->mutex);
 }
@@ -4067,7 +4072,7 @@ pm_lc_flush_slot(void) {
  * */
 void
 //pm_handle_finished_slot(PMEM_LIST_CLEANER_SLOT* slot) {
-pm_handle_finished_block(PMEM_BUF_BLOCK* pblock){
+pm_handle_finished_block_v2(PMEM_BUF_BLOCK* pblock){
 
 	//(1) handle the flush_list
 	PMEM_LIST_CLEANER_SLOT* slot;	
@@ -4113,14 +4118,14 @@ pm_handle_finished_block(PMEM_BUF_BLOCK* pblock){
 		assert( !TOID_IS_NULL(pflush_list->prev_list) );
 		pmemobj_rwlock_wrlock(gb_pmw->pop, &D_RW(pflush_list->prev_list)->lock);
 
-		PMEM_BUF_BLOCK_LIST* pprev_list = D_RW(pflush_list->prev_list);
+		//PMEM_BUF_BLOCK_LIST* pprev_list = D_RW(pflush_list->prev_list);
 
 		TOID_ASSIGN( D_RW(pflush_list->prev_list)->next_list, pflush_list->next_list.oid);
 
 		if (!TOID_IS_NULL(pflush_list->next_list) ) {
 		pmemobj_rwlock_wrlock(gb_pmw->pop, &D_RW(pflush_list->next_list)->lock);
 
-		PMEM_BUF_BLOCK_LIST* pnext_list = D_RW(pflush_list->next_list);
+		//PMEM_BUF_BLOCK_LIST* pnext_list = D_RW(pflush_list->next_list);
 
 		TOID_ASSIGN(D_RW(pflush_list->next_list)->prev_list, pflush_list->prev_list.oid);
 
@@ -4143,7 +4148,7 @@ pm_handle_finished_block(PMEM_BUF_BLOCK* pblock){
 		POBJ_LIST_INSERT_TAIL(gb_pmw->pop, &pfree_pool->head, flush_list, list_entries);
 		pfree_pool->cur_lists++;
 
-		printf("PMEM_DEBUG: in fil_aio_wait(), reuse list id: %zd, slot id %zu cur_lists in free_pool= %zd \n", pflush_list->list_id, slot->id, pfree_pool->cur_lists);
+		//printf("PMEM_DEBUG: in fil_aio_wait(), reuse list id: %zd, slot id %zu cur_lists in free_pool= %zd \n", pflush_list->list_id, slot->id, pfree_pool->cur_lists);
 		pmemobj_rwlock_unlock(gb_pmw->pop, &pfree_pool->lock);
 
 		// (4) reset the slot
@@ -4168,6 +4173,7 @@ pm_handle_finished_block(PMEM_BUF_BLOCK* pblock){
 	pmemobj_rwlock_unlock(gb_pmw->pop, &pflush_list->lock);
 
 }
+
 /*
  * this function wait until at least one request finish
  */
@@ -4267,15 +4273,12 @@ DECLARE_THREAD(pm_buf_flush_list_cleaner_coordinator)(
 
 	pm_buf_list_cleaner_is_active = true;
 
-	ulint ret;
+	//ulint ret;
 
 	while (srv_shutdown_state == SRV_SHUTDOWN_NONE) {
-		os_thread_sleep(10000);
+		os_thread_sleep(10000000);
+		printf("PMEM_INFO: free_pool cur_lists=%zu \n", D_RW(gb_pmw->pbuf->free_pool)->cur_lists );
 
-		// we trigger when the server start
-#ifdef UNIV_DEBUG
-		ut_d(pm_buf_flush_list_cleaner_disabled_loop());
-#endif
 		if (srv_shutdown_state != SRV_SHUTDOWN_NONE) {
 			break;
 		}

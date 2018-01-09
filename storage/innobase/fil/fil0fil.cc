@@ -5859,20 +5859,6 @@ fil_io(
 	}
 #else /* UNIV_HOTBACKUP */
 	/* Queue the aio request */
-#if defined(UNIV_PMEMOBJ_BUF)
-/*
-		if (message != NULL) {
-			PMEM_BUF_BLOCK* pblock = static_cast<PMEM_BUF_BLOCK*> (message);
-			if (pblock != NULL && pblock->check == PMEM_AIO_CHECK) {
-		TOID(PMEM_BUF_BLOCK_LIST) flush_list;
-		TOID_ASSIGN(flush_list, pblock->list.oid);
-		PMEM_BUF_BLOCK_LIST* pflush_list = D_RW(flush_list);
-				printf("==> os_aio(), file %s offset %zu list id %zu n_pending %zu / %zu page_id %zu space_id %zu  sync=%d \n", node->name, offset, pflush_list->list_id, pflush_list->n_pending, pflush_list->cur_pages, pblock->id.page_no(), pblock->id.space(), pblock->sync );
-			} 
-
-		}
-*/
-#endif
 	err = os_aio(
 		req_type,
 		mode, node->name, node->handle, buf, offset, len,
@@ -5883,7 +5869,7 @@ fil_io(
 #endif /* UNIV_HOTBACKUP */
 
 #if defined (UNIV_PMEMOBJ_BUF)
-skip_io:
+//skip_io:
 #endif //UNIV_PMEMOBJ_BUF
 
 #if defined (UNIV_NVM_LOG) 
@@ -5991,10 +5977,9 @@ fil_aio_wait(
 		if (message != NULL) {
 #if defined (UNIV_PMEMOBJ_BUF)
 			PMEM_BUF_BLOCK* pblock = static_cast<PMEM_BUF_BLOCK*> (message);
-			PMEM_LIST_CLEANER_SLOT* pslot = static_cast<PMEM_LIST_CLEANER_SLOT*> (message);
 			if (pblock != NULL && pblock->check == PMEM_AIO_CHECK) {
-				//pm_handle_finished_slot(pslot);
-				pm_handle_finished_block(pblock);
+				//pm_handle_finished_block(pblock);
+				pm_handle_finished_block(gb_pmw->pop, gb_pmw->pbuf,  pblock);
 			} //end if pmem aio
 			else {
 		//		printf("PMEM_DEBUG: pblock is not NULL but not from PMEM???\n");

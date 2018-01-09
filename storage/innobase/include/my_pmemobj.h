@@ -246,8 +246,10 @@ const PMEM_BUF_BLOCK*
 pm_buf_read(PMEMobjpool* pop, PMEM_BUF* buf, const page_id_t page_id, const page_size_t size, byte* data, bool sync);
 
 void
-//pm_buf_flush_list(PMEMobjpool* pop, PMEM_BUF* buf, PMEM_BUF_BLOCK_LIST* plist);
-pm_buf_flush_list(PMEMobjpool* pop, PMEM_BUF* buf, PMEM_LIST_CLEANER_SLOT* slot);
+pm_buf_flush_list(PMEMobjpool* pop, PMEM_BUF* buf, PMEM_BUF_BLOCK_LIST* plist);
+
+void
+pm_buf_flush_list_v2(PMEMobjpool* pop, PMEM_BUF* buf, PMEM_LIST_CLEANER_SLOT* slot);
 
 void
 pm_buf_write_aio_complete(PMEMobjpool* pop, PMEM_BUF* buf, TOID(PMEM_BUF_BLOCK)* ptoid_block);
@@ -336,9 +338,13 @@ pm_lc_resume(
 void
 pm_lc_flush_slot(void);
 
+//version 1: implemented in pmem0buf, directly handle without using thread slot
 void
-//pm_handle_finished_slot(PMEM_LIST_CLEANER_SLOT* slot);
-pm_handle_finished_block(PMEM_BUF_BLOCK* pblock);
+pm_handle_finished_block(PMEMobjpool* pop, PMEM_BUF* buf, PMEM_BUF_BLOCK* pblock);
+
+//version 2 is implemented in buf0flu.cc that handle threads slot
+void
+pm_handle_finished_block_v2(PMEM_BUF_BLOCK* pblock);
 
 bool
 pm_lc_wait_finished(
