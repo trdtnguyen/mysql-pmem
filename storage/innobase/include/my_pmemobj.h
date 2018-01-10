@@ -62,6 +62,8 @@ typedef struct __pmem_list_cleaner_slot PMEM_LIST_CLEANER_SLOT;
 struct __pmem_list_cleaner;
 typedef struct __pmem_list_cleaner PMEM_LIST_CLEANER;
 
+struct __pmem_buf_bucket_stat;
+typedef struct __pmem_buf_bucket_stat PMEM_BUCKET_STAT;
 
 
 POBJ_LAYOUT_BEGIN(my_pmemobj);
@@ -190,7 +192,8 @@ struct __pmem_buf_block_t{
 
 struct __pmem_buf_block_list_t {
 	PMEMrwlock				lock;
-	uint64_t				list_id;
+	uint64_t				list_id; //id of this list in total PMEM area
+	int						hashed_id; //id of this list if it is in a bucket, PMEM_ID_NONE if it is in free list
 	TOID_ARRAY(TOID(PMEM_BUF_BLOCK))	arr;
 	//POBJ_LIST_HEAD(block_list, PMEM_BUF_BLOCK) head;
 	TOID(PMEM_BUF_BLOCK_LIST) next_list;
@@ -218,20 +221,53 @@ struct __pmem_buf {
 	size_t size;
 	size_t page_size;
 	PMEM_OBJ_TYPES type;	
+
 	PMEMoid  data; //pmem data
 	//char* p_align; //align 
 	byte* p_align; //align 
+
 	bool is_new;
 	TOID(PMEM_BUF_FREE_POOL) free_pool;
 	TOID_ARRAY(TOID(PMEM_BUF_BLOCK_LIST)) buckets;
+
 	FILE* deb_file;
+#if defined(UNIV_PMEMOBJ_BUF_STAT)
+	PMEM_BUCKET_STAT* bucket_stats; //array of bucket stats
+#endif
+
+	bool is_async_only; //true if we only capture non-sync write from buffer pool
+
+	//Those varables are in DRAM
+	os_event_t*  flush_events; //N flush events for N buckets
+	os_event_t free_pool_event; //event for free_pool
 };
+
+#if defined(UNIV_PMEMOBJ_BUF_STAT)
+//statistic info about a bucket
+//Objects of those struct do not need in PMEM
+struct __pmem_buf_bucket_stat {
+	PMEMrwlock		lock;
+
+	uint64_t		n_writes;
+	uint64_t		n_overwrites;
+	uint64_t		n_reads;	
+	uint64_t		max_linked_lists;
+	uint64_t		n_flushed_lists;
+};
+
+#endif
 
 bool pm_check_io(byte* frame, page_id_t  page_id);
 
+void pm_wrapper_buf_alloc_or_open(PMEM_WRAPPER* pmw, const size_t buf_size, const size_t page_size);
+void pm_wrapper_buf_close(PMEM_WRAPPER* pmw);
 int pm_wrapper_buf_alloc(PMEM_WRAPPER* pmw, const size_t size, const size_t page_size);
+
+
 PMEM_BUF* pm_pop_get_buf(PMEMobjpool* pop);
 PMEM_BUF* pm_pop_buf_alloc(PMEMobjpool* pop, const size_t size, const size_t page_size);
+
+
 int 
 pm_buf_block_init(PMEMobjpool *pop, void *ptr, void *arg);
 
@@ -257,6 +293,11 @@ pm_buf_write_aio_complete(PMEMobjpool* pop, PMEM_BUF* buf, TOID(PMEM_BUF_BLOCK)*
 //pm_buf_write_aio_complete(PMEMobjpool* pop, PMEM_BUF* buf, PMEMoid* poid);
 
 PMEM_BUF* pm_pop_get_buf(PMEMobjpool* pop);
+
+#if defined(UNIV_PMEMOBJ_BUF_STAT)
+void
+	pm_buf_bucket_stat_init(PMEM_BUF* pbuf);
+#endif
 //DEBUG functions
 
 void pm_buf_print_lists_info(PMEM_BUF* buf);

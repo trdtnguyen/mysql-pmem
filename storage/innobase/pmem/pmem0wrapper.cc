@@ -106,6 +106,7 @@ PMEM_WRAPPER* pm_wrapper_create(const char* path, const size_t pool_size){
 			printf("[PMEMOBJ_INFO] the pmem buf is empty. The database is new\n");
 		}	
 	}
+
 	return pmw;
 
 err:
@@ -115,11 +116,19 @@ err:
 	return NULL;
 }
 
+/*
+ *This function free things allocated in DRAM
+ * */
 void pm_wrapper_free(PMEM_WRAPPER* pmw){
 	if(pmw->pop)
 		pm_pop_free(pmw->pop);
 	pmw->plogbuf = NULL;
 	pmw->pop = NULL;
+
+	//PMEM buf
+	pm_wrapper_buf_close(pmw);
+	pmw->pbuf = NULL;
+
 	printf("PMEMOBJ_INFO: free PMEM_WRAPPER from heap allocated\n");
 	free(pmw);
 

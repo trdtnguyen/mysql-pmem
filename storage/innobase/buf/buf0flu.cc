@@ -1085,7 +1085,18 @@ buf_flush_write_block_low(
 	// EXCEPT: space 0
 	//if (bpage->id.page_no() != 0) {
 	//if(0) {
-	if(!sync) {
+	
+	if (gb_pmw->pbuf->is_async_only) {
+		if(!sync) {
+			int ret = pm_buf_write(gb_pmw->pop, gb_pmw->pbuf, bpage->id, bpage->size, frame, false);
+			assert(ret == PMEM_SUCCESS);
+			//After memcpy, We need this call to sync the buffer pool variables	
+			assert(buf_page_io_complete(bpage));
+			goto skip_write;
+		}
+	}
+	else {
+		//capture both sync and async write from buffer pool
 		int ret = pm_buf_write(gb_pmw->pop, gb_pmw->pbuf, bpage->id, bpage->size, frame, sync);
 		assert(ret == PMEM_SUCCESS);
 		//After memcpy, We need this call to sync the buffer pool variables	
@@ -4293,7 +4304,7 @@ DECLARE_THREAD(pm_buf_flush_list_cleaner_coordinator)(
 	and no more access to list_cleaner structure by them.
 	Wakes worker threads up just to make them exit. */
 	list_cleaner->is_running = false;
-	os_event_set(list_cleaner->is_requested);
+	//os_event_set(list_cleaner->is_requested);
 
 	pm_list_cleaner_close();
 

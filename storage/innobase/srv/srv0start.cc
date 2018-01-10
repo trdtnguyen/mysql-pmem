@@ -1313,7 +1313,7 @@ srv_shutdown_all_bg_threads()
 
 			os_event_set(buf_flush_event);
 #if defined (UNIV_PMEMOBJ_BUF)
-			os_event_set(pm_buf_flush_event);
+//			os_event_set(pm_buf_flush_event);
 #endif
 
 			if (!buf_page_cleaner_is_active
@@ -1907,31 +1907,9 @@ innobase_start_or_create_for_mysql(void)
 	log_init();
 
 #if defined (UNIV_PMEMOBJ_BUF)
-	//Allocate the buffer in pmem
-	if (!gb_pmw->pbuf) {
-		size_t buf_size = srv_pmem_buf_size * 1024 * 1024;
-			printf("PMEMOBJ_INFO: allocate %zd MB of buffer in pmem\n", srv_pmem_buf_size);
-		if ( pm_wrapper_buf_alloc(gb_pmw, buf_size, UNIV_PAGE_SIZE) == PMEM_ERROR ) {
-			printf("PMEMOBJ_ERROR: error when allocate buffer in buf_dblwr_init()\n");
-		}
-	}
-	else {
-		printf("!!!!!!! [PMEMOBJ_INFO]: the server restart from a crash but the buffer is persist, in pmem: size = %zd free_pool has = %zd free lists\n", 
-				gb_pmw->pbuf->size, D_RW(gb_pmw->pbuf->free_pool)->cur_lists);
-		//Check the page_size of the previous run with current run
-		if (gb_pmw->pbuf->page_size != UNIV_PAGE_SIZE) {
-			printf("PMEM_ERROR: the pmem buffer size = %zu is different with UNIV_PAGE_SIZE = %zu, you must use the same page_size!!!\n ",
-					gb_pmw->pbuf->page_size, UNIV_PAGE_SIZE);
-			assert(0);
-		}
-			
-		//We need to re-align the p_align
-		byte* p;
-		p = static_cast<byte*> (pmemobj_direct(gb_pmw->pbuf->data));
-		assert(p);
-		//gb_pmw->pbuf->p_align = static_cast<char*> (ut_align(p, UNIV_PAGE_SIZE));
-		gb_pmw->pbuf->p_align = static_cast<byte*> (ut_align(p, UNIV_PAGE_SIZE));
-	}
+	size_t buf_size = srv_pmem_buf_size * 1024 * 1024;
+	pm_wrapper_buf_alloc_or_open(gb_pmw, buf_size, UNIV_PAGE_SIZE);
+	
 	//[TODO] Recovery handler
 #endif /* UNIV_PMEMOBJ_BUF */
 
@@ -1967,15 +1945,15 @@ innobase_start_or_create_for_mysql(void)
 	}
 #if defined (UNIV_PMEMOBJ_BUF) 
 	//Declare the coordinator and worker flush threads for PMEM
-	pm_list_cleaner_init();
+	//pm_list_cleaner_init();
 
 	os_thread_create(pm_buf_flush_list_cleaner_coordinator,
 			 NULL, NULL);
-	printf("PMEM_INFO: ========>   create %d worker threads for pm\n", PMEM_N_BUCKETS);
-	for (i = 1; i < PMEM_N_BUCKETS; ++i) {
-		os_thread_create(pm_buf_flush_list_cleaner_worker,
-				 NULL, NULL);
-	}
+	//printf("PMEM_INFO: ========>   create %d worker threads for pm\n", PMEM_N_BUCKETS);
+	//for (i = 1; i < PMEM_N_BUCKETS; ++i) {
+	//	os_thread_create(pm_buf_flush_list_cleaner_worker,
+	//			 NULL, NULL);
+	//}
 #endif //UNIV_PMEMOBJ_BUF
 
 	srv_start_state_set(SRV_START_STATE_IO);
@@ -2669,7 +2647,7 @@ files_checked:
 	/* wake main loop of page cleaner up */
 	os_event_set(buf_flush_event);
 #if defined(UNIV_PMEMOBJ_BUF)
-	os_event_set(pm_buf_flush_event);
+	//os_event_set(pm_buf_flush_event);
 #endif
 
 	sum_of_data_file_sizes = srv_sys_space.get_sum_of_sizes();
@@ -2929,7 +2907,7 @@ innobase_shutdown_for_mysql(void)
 	pfc_free(gb_pfc);
 #endif
 
-#if defined (UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_DBW)
+#if defined (UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_DBW) || defined(UNIV_PMEMOBJ_BUF)
 	pm_wrapper_free(gb_pmw);
 #endif
 	return(DB_SUCCESS);
