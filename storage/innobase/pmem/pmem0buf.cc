@@ -38,8 +38,11 @@ pm_wrapper_buf_alloc_or_open(PMEM_WRAPPER*		pmw,
 							 const double		ratio)
 {
 
-	int i;
+	uint64_t i;
 	char sbuf[256];
+
+	PMEM_N_BUCKETS = srv_pmem_buf_n_buckets;
+	PMEM_BUF_FLUSH_PCT = srv_pmem_buf_flush_pct;
 
 	if (!pmw->pbuf) {
 		//Case 1: Alocate new buffer in PMEM
@@ -70,14 +73,14 @@ pm_wrapper_buf_alloc_or_open(PMEM_WRAPPER*		pmw,
 	pmw->pbuf->flush_events = (os_event_t*) calloc(PMEM_N_BUCKETS, sizeof(os_event_t));
 
 	for ( i = 0; i < PMEM_N_BUCKETS; i++) {
-		sprintf(sbuf,"pm_flush_bucket%d", i);
+		sprintf(sbuf,"pm_flush_bucket%zu", i);
 		pmw->pbuf->flush_events[i] = os_event_create(sbuf);
 	}
 		pmw->pbuf->free_pool_event = os_event_create("pm_free_pool_event");
 }
 
 void pm_wrapper_buf_close(PMEM_WRAPPER* pmw) {
-	int i;
+	uint64_t i;
 
 	for ( i = 0; i < PMEM_N_BUCKETS; i++) {
 		os_event_destroy(pmw->pbuf->flush_events[i]); 
@@ -167,8 +170,6 @@ pm_buf_list_init(PMEMobjpool*	pop,
 	PMEM_BUF_BLOCK_LIST* plist;
 	page_size_t page_size_obj(page_size, page_size, false);
 
-	PMEM_N_BUCKETS = srv_pmem_buf_n_buckets;
-	PMEM_BUF_FLUSH_PCT = srv_pmem_buf_flush_pct;
 
 	size_t n_pages = (total_size / page_size);
 
@@ -1049,7 +1050,7 @@ bool pm_check_io(byte* frame, page_id_t page_id) {
 void pm_buf_print_lists_info(PMEM_BUF* buf){
 	PMEM_BUF_FREE_POOL* pfreepool;
 	PMEM_BUF_BLOCK_LIST* plist;
-	int i;
+	uint64_t i;
 
 	printf("PMEM_DEBUG ==================\n");
 
@@ -1061,7 +1062,7 @@ void pm_buf_print_lists_info(PMEM_BUF* buf){
 	for (i = 0; i < PMEM_N_BUCKETS; i++){
 
 		plist = D_RW( D_RW(buf->buckets)[i] );
-		printf("\tBucket %d: list_id=%zu cur_pages=%zd ", i, plist->list_id, plist->cur_pages);
+		printf("\tBucket %zu: list_id=%zu cur_pages=%zd ", i, plist->list_id, plist->cur_pages);
 		printf("\n");
 	}		
 }
