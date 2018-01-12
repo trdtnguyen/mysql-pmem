@@ -1756,7 +1756,12 @@ innobase_start_or_create_for_mysql(void)
 		ib::info() << "======= Hello PMEMOBJ Buffer from VLDB lab ========\n";
 	#endif
 	ib::info() << "======== pool_size =" << srv_pmem_pool_size << 
-		"MB; srv_pmem_buf_size= " << srv_pmem_buf_size << "MB\n";
+		"MB; srv_pmem_buf_size= " << srv_pmem_buf_size << "MB; " <<
+	    "; n_buckets=" << srv_pmem_buf_n_buckets <<
+	    "; used_free_ratio=" << srv_pmem_buf_used_free_ratio <<
+	    "; flush_pct=" << srv_pmem_buf_flush_pct <<
+		";\n";
+
 //	gb_pop = pmem_create_PMEMobjpool(srv_log_group_home_dir);
 	sprintf(PMEM_FILE_PATH, "%s/%s",srv_pmem_home_dir, PMEMOBJ_FILE_NAME);
 	size_t pool_size = srv_pmem_pool_size * 1024 * 1024;
@@ -1908,7 +1913,10 @@ innobase_start_or_create_for_mysql(void)
 
 #if defined (UNIV_PMEMOBJ_BUF)
 	size_t buf_size = srv_pmem_buf_size * 1024 * 1024;
-	pm_wrapper_buf_alloc_or_open(gb_pmw, buf_size, UNIV_PAGE_SIZE);
+	pm_wrapper_buf_alloc_or_open(gb_pmw,
+							     buf_size,
+								 UNIV_PAGE_SIZE, 
+								 srv_pmem_buf_used_free_ratio);
 	
 	//[TODO] Recovery handler
 #endif /* UNIV_PMEMOBJ_BUF */

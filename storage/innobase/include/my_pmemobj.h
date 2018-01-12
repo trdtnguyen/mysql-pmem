@@ -205,7 +205,8 @@ struct __pmem_buf_block_list_t {
 	size_t				max_pages; //max number of pages
 	size_t				cur_pages; // current buffered pages
 	bool				is_flush;
-	size_t				n_aio_pending; //number of pending flush
+	size_t				n_aio_pending; //number of pending aio
+	size_t				n_sio_pending; //number of pending sync io 
 	size_t				n_flush; //number of flush
 	int					check;
 	ulint				last_time;
@@ -259,20 +260,41 @@ struct __pmem_buf_bucket_stat {
 
 bool pm_check_io(byte* frame, page_id_t  page_id);
 
-void pm_wrapper_buf_alloc_or_open(PMEM_WRAPPER* pmw, const size_t buf_size, const size_t page_size);
-void pm_wrapper_buf_close(PMEM_WRAPPER* pmw);
-int pm_wrapper_buf_alloc(PMEM_WRAPPER* pmw, const size_t size, const size_t page_size);
+void
+pm_wrapper_buf_alloc_or_open(
+		 PMEM_WRAPPER*		pmw,
+		 const size_t		buf_size,
+		 const size_t		page_size,
+		 const double		ratio);
 
+void pm_wrapper_buf_close(PMEM_WRAPPER* pmw);
+
+int
+pm_wrapper_buf_alloc(
+		PMEM_WRAPPER*		pmw,
+	    const size_t		size,
+		const size_t		page_size,
+		const double		ratio);
 
 PMEM_BUF* pm_pop_get_buf(PMEMobjpool* pop);
-PMEM_BUF* pm_pop_buf_alloc(PMEMobjpool* pop, const size_t size, const size_t page_size);
 
+PMEM_BUF* 
+pm_pop_buf_alloc(
+		 PMEMobjpool*		pop,
+		 const size_t		size,
+		 const size_t		page_size,
+		 const double		ratio);
 
 int 
 pm_buf_block_init(PMEMobjpool *pop, void *ptr, void *arg);
 
-void
-pm_buf_list_init(PMEMobjpool* pop, PMEM_BUF* buf, const size_t size, const size_t page_size);
+void 
+pm_buf_list_init(
+		PMEMobjpool*	pop,
+		PMEM_BUF*		buf, 
+		const size_t	total_size,
+		const size_t	page_size,
+		const double	ratio);
 
 int
 //pm_buf_write(PMEMobjpool* pop, PMEM_BUF* buf, buf_page_t* bpage, void* data, bool sync);

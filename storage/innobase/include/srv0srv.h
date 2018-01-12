@@ -272,6 +272,9 @@ extern const ulint	SRV_UNDO_TABLESPACE_SIZE_IN_PAGES;
 extern char*	srv_pmem_home_dir;
 extern ulong	srv_pmem_pool_size;
 extern ulong	srv_pmem_buf_size;
+extern double	srv_pmem_buf_used_free_ratio;
+extern ulong	srv_pmem_buf_n_buckets;
+extern double	srv_pmem_buf_flush_pct;
 #endif 
 extern char*	srv_log_group_home_dir;
 

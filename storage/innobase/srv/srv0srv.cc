@@ -205,6 +205,9 @@ extern bool		trx_commit_disallowed;
 char*	srv_pmem_home_dir	= NULL;
 ulong	srv_pmem_pool_size	= 8 * 1024;
 ulong	srv_pmem_buf_size	= 4 * 1024;
+double	srv_pmem_buf_used_free_ratio	= 0.5;
+ulong	srv_pmem_buf_n_buckets	= 128;
+double	srv_pmem_buf_flush_pct	= 0.9;
 #endif
 char*	srv_log_group_home_dir	= NULL;
 
