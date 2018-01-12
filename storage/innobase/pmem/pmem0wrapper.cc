@@ -120,14 +120,15 @@ err:
  *This function free things allocated in DRAM
  * */
 void pm_wrapper_free(PMEM_WRAPPER* pmw){
+	//PMEM buf
+	pm_wrapper_buf_close(pmw);
+
 	if(pmw->pop)
 		pm_pop_free(pmw->pop);
 	pmw->plogbuf = NULL;
 	pmw->pop = NULL;
-
-	//PMEM buf
-	pm_wrapper_buf_close(pmw);
 	pmw->pbuf = NULL;
+
 
 	printf("PMEMOBJ_INFO: free PMEM_WRAPPER from heap allocated\n");
 	free(pmw);

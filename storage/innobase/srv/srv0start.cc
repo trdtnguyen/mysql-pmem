@@ -2828,6 +2828,10 @@ innobase_shutdown_for_mysql(void)
 			" inside InnoDB at shutdown";
 	}
 
+#if defined (UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_DBW) || defined(UNIV_PMEMOBJ_BUF)
+	pm_wrapper_free(gb_pmw);
+#endif
+
 	/* 2. Make all threads created by InnoDB to exit */
 	srv_shutdown_all_bg_threads();
 
@@ -2915,9 +2919,6 @@ innobase_shutdown_for_mysql(void)
 	pfc_free(gb_pfc);
 #endif
 
-#if defined (UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_DBW) || defined(UNIV_PMEMOBJ_BUF)
-	pm_wrapper_free(gb_pmw);
-#endif
 	return(DB_SUCCESS);
 }
 #endif /* !UNIV_HOTBACKUP */
