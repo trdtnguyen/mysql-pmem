@@ -27,8 +27,10 @@
 
 //#include "srv0start.h" //for SRV_SHUTDOWN_NONE
 
+#if defined (UNIV_PMEMOBJ_BUF)
 //GLOBAL variables
 static uint64_t PMEM_N_BUCKETS;
+static uint64_t PMEM_BUCKET_SIZE;
 static double PMEM_BUF_FLUSH_PCT;
 
 void
@@ -42,6 +44,7 @@ pm_wrapper_buf_alloc_or_open(PMEM_WRAPPER*		pmw,
 	char sbuf[256];
 
 	PMEM_N_BUCKETS = srv_pmem_buf_n_buckets;
+	PMEM_BUCKET_SIZE = srv_pmem_buf_bucket_size;
 	PMEM_BUF_FLUSH_PCT = srv_pmem_buf_flush_pct;
 
 	if (!pmw->pbuf) {
@@ -77,6 +80,20 @@ pm_wrapper_buf_alloc_or_open(PMEM_WRAPPER*		pmw,
 		pmw->pbuf->flush_events[i] = os_event_create(sbuf);
 	}
 		pmw->pbuf->free_pool_event = os_event_create("pm_free_pool_event");
+
+
+	//Alocate the param array
+	PMEM_BUF_BLOCK_LIST* plist;
+	pmw->pbuf->params_arr = static_cast<PMEM_AIO_PARAM**> (
+		calloc(PMEM_N_BUCKETS, sizeof(PMEM_AIO_PARAM*)));	
+	for ( i = 0; i < PMEM_N_BUCKETS; i++) {
+		plist = D_RW(D_RW(pmw->pbuf->buckets)[i]);
+
+		pmw->pbuf->params_arr[i] = static_cast<PMEM_AIO_PARAM*> (
+				calloc(plist->max_pages, sizeof(PMEM_AIO_PARAM)));
+	}
+
+	
 }
 
 void pm_wrapper_buf_close(PMEM_WRAPPER* pmw) {
@@ -87,6 +104,12 @@ void pm_wrapper_buf_close(PMEM_WRAPPER* pmw) {
 	}
 	os_event_destroy(pmw->pbuf->free_pool_event);
 	free(pmw->pbuf->flush_events);
+
+	//Free the param array
+	for ( i = 0; i < PMEM_N_BUCKETS; i++) {
+		free(pmw->pbuf->params_arr[i]);
+	}
+	free(pmw->pbuf->params_arr);
 }
 
 int
@@ -173,16 +196,15 @@ pm_buf_list_init(PMEMobjpool*	pop,
 
 	size_t n_pages = (total_size / page_size);
 
-	//size_t bucket_size = total_size / (PMEM_N_BUCKETS * PMEM_MAX_LISTS_PER_BUCKET);
+	//size_t n_lists_in_free_pool = static_cast <size_t> ((PMEM_N_BUCKETS * 1.0) * ratio);
+
+	//size_t bucket_size = total_size / (PMEM_N_BUCKETS + n_lists_in_free_pool);
+	size_t bucket_size = PMEM_BUCKET_SIZE * page_size;
 	//size_t n_pages_per_bucket = bucket_size / page_size;
+	size_t n_pages_per_bucket = PMEM_BUCKET_SIZE;
+	//size_t n_lists_in_free_pool = static_cast <size_t> (n_pages - PMEM_BUCKET_SIZE * PMEM_N_BUCKETS) / PMEM_BUCKET_SIZE;
+	size_t n_lists_in_free_pool = n_pages / PMEM_BUCKET_SIZE - PMEM_N_BUCKETS;
 
-	//size_t total_lists = total_size / bucket_size;
-	//size_t n_lists_in_free_pool = total_lists - PMEM_N_BUCKETS;
-
-	size_t n_lists_in_free_pool = static_cast <size_t> ((PMEM_N_BUCKETS * 1.0) * ratio);
-
-	size_t bucket_size = total_size / (PMEM_N_BUCKETS + n_lists_in_free_pool);
-	size_t n_pages_per_bucket = bucket_size / page_size;
 
 	printf("\n\n=======> PMEM_INFO: n_pages = %zu bucket size = %f MB (%zu %zu-KB pages) n_lists in free_pool %zu\n", n_pages, bucket_size*1.0 / (1024*1024), n_pages_per_bucket, (page_size/1024), n_lists_in_free_pool);
 
@@ -222,6 +244,7 @@ pm_buf_list_init(PMEMobjpool*	pop,
 		plist->n_sio_pending = 0;
 		plist->max_pages = bucket_size / page_size;
 		plist->list_id = cur_bucket;
+		plist->hashed_id = cur_bucket;
 		cur_bucket++;
 		plist->hashed_id = i;
 		plist->check = PMEM_AIO_CHECK;
@@ -288,6 +311,7 @@ pm_buf_list_init(PMEMobjpool*	pop,
 		pfreelist->n_aio_pending = 0;
 		pfreelist->n_sio_pending = 0;
 		pfreelist->list_id = cur_bucket;
+		pfreelist->hashed_id = PMEM_ID_NONE;
 		cur_bucket++;
 		pfreelist->check = PMEM_AIO_CHECK;
 		TOID_ASSIGN(pfreelist->next_list, OID_NULL);
@@ -564,7 +588,7 @@ get_free_list:
 		if (D_RW(buf->free_pool)->cur_lists == 0 ||
 				TOID_IS_NULL(first_list) ) {
 			pthread_t tid;
-			tid = pthread_self();
+		 	tid = pthread_self();
 			printf("PMEM_INFO: thread %zu free_pool->cur_lists = %zu, the first list is NULL? %d the free list is empty, sleep then retry..\n", tid, D_RO(buf->free_pool)->cur_lists, TOID_IS_NULL(first_list));
 			pmemobj_rwlock_unlock(pop, &(D_RW(buf->free_pool)->lock));
 			//pmemobj_rwlock_unlock(pop, &phashlist->lock);
@@ -577,8 +601,11 @@ get_free_list:
 
 		POBJ_LIST_REMOVE(pop, &D_RW(buf->free_pool)->head, first_list, list_entries);
 		D_RW(buf->free_pool)->cur_lists--;
-
+			
 		assert(!TOID_IS_NULL(first_list));
+		//This ref hashed_id used for batch AIO
+		//Hashed id of old list is kept until its batch AIO is completed
+		D_RW(first_list)->hashed_id = hashed;
 		
 		//The free_pool may empty now, wait in necessary
 		os_event_reset(buf->free_pool_event);
@@ -615,7 +642,7 @@ get_free_list:
 	return PMEM_SUCCESS;
 }
 
-/*  VERSION 1 (DIRECTLY CALL)
+/*  VERSION 0 (BATCH)
  * Async write pages from the list to datafile
  * The caller thread need to lock/unlock the plist
  * See buf_dblwr_write_block_to_datafile
@@ -625,6 +652,30 @@ get_free_list:
  * */
 void
 pm_buf_flush_list(PMEMobjpool* pop, PMEM_BUF* buf, PMEM_BUF_BLOCK_LIST* plist) {
+
+	assert(pop);
+	assert(buf);
+
+#if defined (UNIV_PMEMOBJ_BUF)
+		ulint type = IORequest::PM_WRITE;
+#else
+		ulint type = IORequest::WRITE;
+#endif
+		IORequest request(type);
+
+		dberr_t err = pm_fil_io_batch(request, pop, buf, plist);
+		
+}
+/*  VERSION 1 (DIRECTLY CALL)
+ * Async write pages from the list to datafile
+ * The caller thread need to lock/unlock the plist
+ * See buf_dblwr_write_block_to_datafile
+ *	@param[in] pop		PMEMobjpool pointer
+ *	@param[in] buf		PMEM_BUF pointer
+ *	@param[in] plist	pointer to the list that will be flushed 
+ * */
+void
+pm_buf_flush_list_v1(PMEMobjpool* pop, PMEM_BUF* buf, PMEM_BUF_BLOCK_LIST* plist) {
 
 	ulint i;
 	//ulint count;
@@ -680,23 +731,12 @@ pm_buf_flush_list(PMEMobjpool* pop, PMEM_BUF* buf, PMEM_BUF_BLOCK_LIST* plist) {
 		//count++;
 		++plist->n_flush;
 
-		//if (pblock->sync) {
-		//	type |= IORequest::DO_NOT_WAKE;
-		//	//the sync IO is not pending
-		//}
-		//else {
-		//	//debug
-		//	count++;
-		//}
-
 		IORequest request(type);
 
-		//dberr_t err = fil_io(request, 
-		//		pblock->sync, pblock->id, pblock->size, 0, pblock->size.physical(),
-		//		pdata + pblock->pmemaddr, D_RW(D_RW(plist->arr)[i]));
 		dberr_t err = fil_io(request, 
-				false, pblock->id, pblock->size, 0, pblock->size.physical(),
-				pdata + pblock->pmemaddr, D_RW(D_RW(plist->arr)[i]));
+			false, pblock->id, pblock->size, 0, pblock->size.physical(),
+			pdata + pblock->pmemaddr, D_RW(D_RW(plist->arr)[i]));
+
 		
 		if(is_lock_block)
 			pmemobj_rwlock_unlock(pop, &pblock->lock);
@@ -821,6 +861,8 @@ pm_buf_flush_list_v2(PMEMobjpool* pop, PMEM_BUF* buf, PMEM_LIST_CLEANER_SLOT* sl
 	//	pmemobj_rwlock_unlock(pop, &plist->lock);
 }
 
+
+
 /*
  *This function is called from aio complete (fil_aio_wait)
  * */
@@ -856,6 +898,7 @@ pm_handle_finished_block(PMEMobjpool* pop, PMEM_BUF* buf, PMEM_BUF_BLOCK* pblock
 
 		pflush_list->cur_pages = 0;
 		pflush_list->is_flush = false;
+		pflush_list->hashed_id = PMEM_ID_NONE;
 		
 		// (2) Remove this list from the doubled-linked list
 		
@@ -1067,4 +1110,4 @@ void pm_buf_print_lists_info(PMEM_BUF* buf){
 	}		
 }
 //////////////////////// THREAD HANDLER /////////////
-
+#endif //UNIV_PMEMOBJ_BUF

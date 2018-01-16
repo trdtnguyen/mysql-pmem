@@ -3715,6 +3715,9 @@ innobase_init(
 	if (!srv_pmem_buf_n_buckets) {
 		srv_pmem_buf_n_buckets = 128;
 	}
+	if (!srv_pmem_buf_bucket_size) {
+		srv_pmem_buf_bucket_size = 256;
+	}
 	if (!srv_pmem_buf_flush_pct) {
 		srv_pmem_buf_flush_pct = 0.9; 
 	}
@@ -19488,6 +19491,10 @@ static MYSQL_SYSVAR_ULONG(pmem_buf_n_buckets, srv_pmem_buf_n_buckets,
   PLUGIN_VAR_RQCMDARG | PLUGIN_VAR_READONLY,
   "Number of buckets in the partition, from 1 to 1024, default is 128.",
   NULL, NULL, 128, 1, 1024,0);
+static MYSQL_SYSVAR_ULONG(pmem_buf_bucket_size, srv_pmem_buf_bucket_size,
+  PLUGIN_VAR_RQCMDARG | PLUGIN_VAR_READONLY,
+  "Size of buckets (number of pages), from 1 to 4096, default is 256.",
+  NULL, NULL, 256, 1, 4096, 0);
 static MYSQL_SYSVAR_DOUBLE(pmem_buf_flush_pct, srv_pmem_buf_flush_pct,
   PLUGIN_VAR_RQCMDARG | PLUGIN_VAR_READONLY,
   "Threshold to flush a sub-list, from 0.1 to 1, default is 0.9",
@@ -20307,6 +20314,7 @@ static struct st_mysql_sys_var* innobase_system_variables[]= {
   MYSQL_SYSVAR(pmem_buf_size),
   MYSQL_SYSVAR(pmem_buf_used_free_ratio),
   MYSQL_SYSVAR(pmem_buf_n_buckets),
+  MYSQL_SYSVAR(pmem_buf_bucket_size),
   MYSQL_SYSVAR(pmem_buf_flush_pct),
 #endif
   MYSQL_SYSVAR(log_group_home_dir),

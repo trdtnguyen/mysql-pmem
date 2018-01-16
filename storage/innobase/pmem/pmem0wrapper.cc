@@ -89,8 +89,9 @@ PMEM_WRAPPER* pm_wrapper_create(const char* path, const size_t pool_size){
 	/* log buffer */
 	pmw->plogbuf = NULL;
 	pmw->pdbw = NULL;
+#if defined (UNIV_PMEMOBJ_BUF)
 	pmw->pbuf = NULL;
-
+#endif 
 	/*If we have persistent data structures, get them*/
 	if(!pmw->is_new) {
 		pmw->plogbuf = pm_pop_get_logbuf(pop);
@@ -101,10 +102,13 @@ PMEM_WRAPPER* pm_wrapper_create(const char* path, const size_t pool_size){
 		if(!pmw->pdbw){
 			printf("[PMEMOBJ_INFO] the pmem double write buffer is empty. The database is new or the previous double write buffer is in disk instead of PMEM\n");
 		}
+
+#if defined (UNIV_PMEMOBJ_BUF)
 		pmw->pbuf = pm_pop_get_buf(pop);
 		if(!pmw->pbuf){
 			printf("[PMEMOBJ_INFO] the pmem buf is empty. The database is new\n");
 		}	
+#endif 
 	}
 
 	return pmw;
@@ -120,15 +124,16 @@ err:
  *This function free things allocated in DRAM
  * */
 void pm_wrapper_free(PMEM_WRAPPER* pmw){
+#if defined (UNIV_PMEMOBJ_BUF)
 	//PMEM buf
 	pm_wrapper_buf_close(pmw);
+	pmw->pbuf = NULL;
+#endif 
 
 	if(pmw->pop)
 		pm_pop_free(pmw->pop);
 	pmw->plogbuf = NULL;
 	pmw->pop = NULL;
-	pmw->pbuf = NULL;
-
 
 	printf("PMEMOBJ_INFO: free PMEM_WRAPPER from heap allocated\n");
 	free(pmw);

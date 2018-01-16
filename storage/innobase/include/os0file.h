@@ -1241,6 +1241,12 @@ The wrapper functions have the prefix of "innodb_". */
 			n, read_only, message1, message2,		\
 			__FILE__, __LINE__)
 
+#if defined (UNIV_PMEMOBJ_BUF)
+# define os_aio_batch(param, n)			\
+	pfs_os_aio_batch_func( params , n,	\
+			__FILE__, __LINE__)
+#endif
+
 # define os_file_read_pfs(type, file, buf, offset, n)			\
 	pfs_os_file_read_func(type, file, buf, offset, n, __FILE__, __LINE__)
 
@@ -1496,6 +1502,43 @@ pfs_os_aio_func(
 	const char*	src_file,
 	ulint		src_line);
 
+#if defined (UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_LOG)
+struct __pmem_aio_param;
+typedef struct __pmem_aio_param PMEM_AIO_PARAM;
+
+struct __pmem_aio_param {
+	const char*			name;
+	pfs_os_file_t		file;	
+	void*				buf;
+	os_offset_t			offset;
+	ulint				n;	
+	fil_node_t*			m1;
+	void*				m2;
+};
+
+UNIV_INLINE
+dberr_t
+pfs_os_aio_batch_func(
+		PMEM_AIO_PARAM* params,
+		uint64_t n,
+		const char* src_file,
+		ulint		src_line
+		);
+//pfs_os_aio_batch_func(
+//	IORequest&	type,
+//	ulint		mode,
+//	const char*	name,
+//	pfs_os_file_t	file,
+//	void*		buf,
+//	os_offset_t	offset,
+//	ulint		n,
+//	bool		read_only,
+//	fil_node_t*	m1,
+//	void*		m2,
+//	const char*	src_file,
+//	ulint		src_line);
+
+#endif
 /** NOTE! Please use the corresponding macro os_file_write(), not directly
 this function!
 This is the performance schema instrumented wrapper function for
@@ -1647,6 +1690,13 @@ to original un-instrumented file I/O APIs */
 		n, read_only, message1, message2)			\
 	os_aio_func(type, mode, name, file, buf, offset,		\
 		n, read_only, message1, message2)
+
+#if defined (UNIV_PMEMOBJ_BUF) 
+# define os_aio_batch(type, mode, name, file, buf, offset,			\
+		n, read_only, message1, message2)			\
+	os_aio_batch_func(type, mode, name, file, buf, offset,		\
+		n, read_only, message1, message2) 
+#endif
 
 # define os_file_read_pfs(type, file, buf, offset, n)			\
 	os_file_read_func(type, file, buf, offset, n)
@@ -1969,6 +2019,26 @@ os_aio_func(
 	bool		read_only,
 	fil_node_t*	m1,
 	void*		m2);
+
+#if defined(UNIV_PMEMOBJ_BUF)
+
+dberr_t
+os_aio_batch_func(
+		PMEM_AIO_PARAM* params,
+		uint64_t n_params
+		);
+
+	//IORequest&	type,
+	//ulint		mode,
+	//const char*	name,
+	//pfs_os_file_t	file,
+	//void*		buf,
+	//os_offset_t	offset,
+	//ulint		n,
+	//bool		read_only,
+	//fil_node_t*	m1,
+	//void*		m2);
+#endif
 
 /** Wakes up all async i/o threads so that they know to exit themselves in
 shutdown. */

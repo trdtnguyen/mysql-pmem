@@ -3,22 +3,6 @@
 #define __PMEM_COMMON_H__
 
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <sys/types.h>                                                                      
-#include <sys/time.h> //for struct timeval, gettimeofday()
-#include <string.h>
-#include <stdint.h> //for uint64_t
-#include <math.h> //for log()
-#include <assert.h>
-#include <wchar.h>
-#include <unistd.h> //for access()
-
-#include "os0file.h"
-//#include "pmem_log.h"
-#include <libpmemobj.h>
-//cc -std=gnu99 ... -lpmemobj -lpmem
-//
 #define PMEM_MAX_FILES 1000
 #define PMEM_MAX_FILE_NAME_LENGTH 10000
 #define PMEM_HASH_MASK 1653893711
@@ -81,6 +65,19 @@ enum pm_list_cleaner_state {
 	Moved from FLUSHING by the worker. */
 	LIST_CLEANER_STATE_FINISHED
 };
+
+//struct __pmem_aio_param;
+//typedef struct __pmem_aio_param PMEM_AIO_PARAM;
+//
+//struct __pmem_aio_param {
+//	const char* name;
+//	void*		file;	
+//	void*		buf;
+//	uint64_t	offset;
+//	uint64_t		n;	
+//	void*		m1;
+//	void*		m2;
+//};
 
 static inline int file_exists(char const *file);
 

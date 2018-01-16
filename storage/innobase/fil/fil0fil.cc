@@ -62,6 +62,7 @@ Created 10/25/1995 Heikki Tuuri
 extern PMEM_FILE_COLL* gb_pfc;
 #endif
 #if defined (UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_DBW) || defined(UNIV_PMEMOBJ_BUF)
+#include "my_pmem_common.h"
 #include "my_pmemobj.h"
 extern PMEM_WRAPPER* gb_pmw;
 #endif
@@ -5922,6 +5923,238 @@ fil_io(
 
 	return(err);
 }
+#if defined (UNIV_PMEMOBJ_BUF) 
+dberr_t
+pm_fil_io_batch(
+		const IORequest&	type,
+		void*				pop_in,
+		void*				pmem_buf_in,
+		void*				plist_in)
+{
+	PMEMobjpool*			pop;
+	PMEM_BUF*				pmem_buf;
+	PMEM_BUF_BLOCK_LIST*	plist;	
+
+	ulint i;
+	TOID(PMEM_BUF_BLOCK) flush_block;
+	PMEM_BUF_BLOCK* pblock;
+	byte* pdata;
+	
+	PMEM_AIO_PARAM* params;
+	uint64_t		n_params;
+	
+	os_offset_t		offset;
+	IORequest		req_type(type);
+	ulint	mode = OS_AIO_NORMAL; //we only do the OS_AIO_NORMAL 
+
+	//Code from our pm_buf_flush_list
+	pop			= static_cast<PMEMobjpool*> (pop_in);
+	pmem_buf	= static_cast<PMEM_BUF*> (pmem_buf_in);
+	plist		= static_cast<PMEM_BUF_BLOCK_LIST*> (plist_in); 
+
+	assert(pop);
+	assert(pmem_buf);
+	assert(plist);
+
+	pdata = pmem_buf->p_align;
+	plist->n_flush = 0;
+	
+	assert(plist->hashed_id != PMEM_ID_NONE);
+
+	params = pmem_buf->params_arr[plist->hashed_id];
+
+	n_params = 0;
+
+	for (i = 0; i < plist->max_pages; ++i) {
+		pblock = D_RW(D_RW(plist->arr)[i]);
+
+		//Becareful with this assert
+		//assert (pblock->state == PMEM_IN_USED_BLOCK);
+
+		//if(is_lock_block)
+		//	pmemobj_rwlock_wrlock(pop, &pblock->lock);
+
+		if (pblock->state == PMEM_FREE_BLOCK ||
+				pblock->state == PMEM_IN_FLUSH_BLOCK) {
+			//printf("!!!!!PMEM_WARNING: in list %zu don't write a FREE BLOCK, skip to next block\n", plist->list_id);
+			continue;
+		}
+		assert( pblock->pmemaddr < pmem_buf->size);
+		UNIV_MEM_ASSERT_RW(pdata + pblock->pmemaddr, page_size);
+#if defined(UNIV_PMEMOBJ_BUF_DEBUG)
+		//	printf("PMEM_DEBUG: aio request page_id %zu space %zu pmemaddr %zu flush_list id=%zu\n", pblock->id.page_no(), pblock->id.space(), pblock->pmemaddr, plist->list_id);
+#endif
+		assert(pblock->state == PMEM_IN_USED_BLOCK);	
+		pblock->state = PMEM_IN_FLUSH_BLOCK;	
+
+		//count++;
+		++plist->n_flush;
+
+		//dberr_t err = pm_fil_io_batch(
+		//		request, plist);
+
+		//Below code merged from fil_io //////////////////////
+		/////////////////////////////////////////////////////////////
+		//Variables replace the param in normal fil_io
+		const page_id_t&	page_id = pblock->id;
+		const page_size_t&	page_size = pblock->size;
+		ulint			byte_offset = 0;
+		ulint			len = pblock->size.physical() ;
+		void*			buf = pdata + pblock->pmemaddr;
+		void*			message = pblock ;
+		srv_stats.data_written.add(len);
+		/* Reserve the fil_system mutex and make sure that we can open at
+		   least one file while holding it, if the file is not already open */
+
+		fil_mutex_enter_and_prepare_for_io(page_id.space());
+		fil_space_t*	space = fil_space_get_by_id(page_id.space());
+		ulint		cur_page_no = page_id.page_no();
+		fil_node_t*	node = UT_LIST_GET_FIRST(space->chain);
+
+		/* Open file if closed */
+		if (!fil_node_prepare_for_io(node, fil_system, space)) {
+			if (fil_type_is_data(space->purpose)
+					&& fil_is_user_tablespace_id(space->id)) {
+				mutex_exit(&fil_system->mutex);
+
+				if (!req_type.ignore_missing()) {
+					ib::error()
+						<< "Trying to do I/O to a tablespace"
+						" which exists without .ibd data file."
+						" I/O type:pm_batch write "
+						<< ", page: "
+						<< page_id_t(page_id.space(),
+								cur_page_no)
+						<< ", I/O length: " << len << " bytes";
+				}
+
+				return(DB_TABLESPACE_DELETED);
+			}
+
+			/* The tablespace is for log. Currently, we just assert here
+			   to prevent handling errors along the way fil_io returns.
+			   Also, if the log files are missing, it would be hard to
+			   promise the server can continue running. */
+			ut_a(0);
+		}
+		/* Check that at least the start offset is within the bounds of a
+		   single-table tablespace, including rollback tablespaces. */
+		if (node->size <= cur_page_no
+				&& space->id != srv_sys_space.space_id()
+				&& fil_type_is_data(space->purpose)) {
+
+			if (req_type.ignore_missing()) {
+				/* If we can tolerate the non-existent pages, we
+				   should return with DB_ERROR and let caller decide
+				   what to do. */
+				fil_node_complete_io(node, fil_system, req_type);
+				mutex_exit(&fil_system->mutex);
+				return(DB_ERROR);
+			}
+
+			fil_report_invalid_page_access(
+					page_id.page_no(), page_id.space(),
+					space->name, byte_offset, len, req_type.is_read());
+		}
+
+		/* Now we have made the changes in the data structures of fil_system */
+		mutex_exit(&fil_system->mutex);
+
+		/* Calculate the low 32 bits and the high 32 bits of the file offset */
+
+		if (!page_size.is_compressed()) {
+
+			offset = ((os_offset_t) cur_page_no
+					<< UNIV_PAGE_SIZE_SHIFT) + byte_offset;
+
+			ut_a(node->size - cur_page_no
+					>= ((byte_offset + len + (UNIV_PAGE_SIZE - 1))
+						/ UNIV_PAGE_SIZE));
+		} else {
+			ulint	size_shift;
+
+			switch (page_size.physical()) {
+				case 1024: size_shift = 10; break;
+				case 2048: size_shift = 11; break;
+				case 4096: size_shift = 12; break;
+				case 8192: size_shift = 13; break;
+				case 16384: size_shift = 14; break;
+				case 32768: size_shift = 15; break;
+				case 65536: size_shift = 16; break;
+				default: ut_error;
+			}
+
+			offset = ((os_offset_t) cur_page_no << size_shift)
+				+ byte_offset;
+
+			ut_a(node->size - cur_page_no
+					>= (len + (page_size.physical() - 1))
+					/ page_size.physical());
+		}
+
+		/* Do AIO */
+
+		ut_a(byte_offset % OS_FILE_LOG_BLOCK_SIZE == 0);
+		ut_a((len % OS_FILE_LOG_BLOCK_SIZE) == 0);
+
+		/* Don't compress the log, page 0 of all tablespaces, tables
+		   compresssed with the old scheme and all pages from the system
+		   tablespace. */
+
+		if (req_type.is_write()
+				&& !req_type.is_log()
+				&& !page_size.is_compressed()
+				&& page_id.page_no() > 0
+				&& IORequest::is_punch_hole_supported()
+				&& node->punch_hole) {
+
+			ut_ad(!req_type.is_log());
+
+			req_type.set_punch_hole();
+
+			req_type.compression_algorithm(space->compression_type);
+
+		} else {
+			req_type.clear_compressed();
+		}
+
+		/* Set encryption information. */
+		fil_io_set_encryption(req_type, page_id, space);
+
+		req_type.block_size(node->block_size);
+
+		//capture the aio request 
+		params[n_params].name = node->name;
+		params[n_params].file = node->handle;
+		params[n_params].buf = buf;
+		params[n_params].offset = offset;
+		params[n_params].n = len;
+		params[n_params].m1 = node;
+		params[n_params].m2 = message;
+		++n_params;
+		//next block
+	} //end for
+
+	if (plist->n_flush != plist->cur_pages ||
+			plist->n_aio_pending + plist->n_sio_pending != plist->cur_pages) {
+		printf("error: list_id %zu n_flush =%zu, n_aio_pending = %zu, n_sio_pending = %zu cur_pages=%zu\n", plist->list_id, plist->n_flush, plist->n_aio_pending, plist->n_sio_pending, plist->cur_pages);
+		assert(0);
+	}
+
+	//Now submit in batch
+	dberr_t	err;
+	/* Queue the aio request */
+	err = os_aio_batch(params, n_params);
+
+	if (err != DB_SUCCESS){
+		printf("PMEM_ERROR: pm_fil_io_batch()list id %zu\n", plist->list_id );
+		assert(0);
+	}
+
+	return DB_SUCCESS;
+
+}
+#endif //UNIV_PMEMOBJ_BUF
 
 #ifndef UNIV_HOTBACKUP
 /**********************************************************************//**

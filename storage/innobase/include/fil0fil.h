@@ -1227,7 +1227,14 @@ fil_io(
 	ulint			len,
 	void*			buf,
 	void*			message);
-
+#if defined (UNIV_PMEMOBJ_BUF)
+dberr_t
+pm_fil_io_batch(
+		const IORequest&	type,
+		void*				pop_in,
+		void*				pmem_buf_in,
+		void*				plist_in);
+#endif
 /**********************************************************************//**
 Waits for an aio operation to complete. This function is used to write the
 handler for completed requests. The aio array of pending requests is divided

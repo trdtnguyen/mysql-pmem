@@ -35,6 +35,16 @@
 #include "my_pmem_common.h"
 //#include "pmem0buf.h"
 //cc -std=gnu99 ... -lpmemobj -lpmem
+struct __pmem_wrapper;
+typedef struct __pmem_wrapper PMEM_WRAPPER;
+
+struct __pmem_dbw;
+typedef struct __pmem_dbw PMEM_DBW;
+
+struct __pmem_log_buf;
+typedef struct __pmem_log_buf PMEM_LOG_BUF;
+
+#if defined (UNIV_PMEMOBJ_BUF)
 struct __pmem_buf_block_t;
 typedef struct __pmem_buf_block_t PMEM_BUF_BLOCK;
 
@@ -44,17 +54,10 @@ typedef struct __pmem_buf_block_list_t PMEM_BUF_BLOCK_LIST;
 struct __pmem_buf_free_pool;
 typedef struct __pmem_buf_free_pool PMEM_BUF_FREE_POOL;
 
-struct __pmem_dbw;
-typedef struct __pmem_dbw PMEM_DBW;
-
-struct __pmem_log_buf;
-typedef struct __pmem_log_buf PMEM_LOG_BUF;
 
 struct __pmem_buf;
 typedef struct __pmem_buf PMEM_BUF;
 
-struct __pmem_wrapper;
-typedef struct __pmem_wrapper PMEM_WRAPPER;
 
 struct __pmem_list_cleaner_slot;
 typedef struct __pmem_list_cleaner_slot PMEM_LIST_CLEANER_SLOT;
@@ -64,18 +67,20 @@ typedef struct __pmem_list_cleaner PMEM_LIST_CLEANER;
 
 struct __pmem_buf_bucket_stat;
 typedef struct __pmem_buf_bucket_stat PMEM_BUCKET_STAT;
-
+#endif //UNIV_PMEMOBJ_BUF
 
 POBJ_LAYOUT_BEGIN(my_pmemobj);
 POBJ_LAYOUT_TOID(my_pmemobj, char);
 POBJ_LAYOUT_TOID(my_pmemobj, PMEM_LOG_BUF);
 POBJ_LAYOUT_TOID(my_pmemobj, PMEM_DBW);
+#if defined(UNIV_PMEMOBJ_BUF)
 POBJ_LAYOUT_TOID(my_pmemobj, PMEM_BUF);
 POBJ_LAYOUT_TOID(my_pmemobj, PMEM_BUF_FREE_POOL);
 POBJ_LAYOUT_TOID(my_pmemobj, PMEM_BUF_BLOCK_LIST);
 POBJ_LAYOUT_TOID(my_pmemobj, TOID(PMEM_BUF_BLOCK_LIST));
 POBJ_LAYOUT_TOID(my_pmemobj, PMEM_BUF_BLOCK);
 POBJ_LAYOUT_TOID(my_pmemobj, TOID(PMEM_BUF_BLOCK));
+#endif //UNIV_PMEMOBJ_BUF
 POBJ_LAYOUT_END(my_pmemobj);
 
 
@@ -86,7 +91,9 @@ struct __pmem_wrapper {
 	PMEMobjpool* pop;
 	PMEM_LOG_BUF* plogbuf;
 	PMEM_DBW* pdbw;
+#if defined (UNIV_PMEMOBJ_BUF)
 	PMEM_BUF* pbuf;
+#endif
 	bool is_new;
 };
 
@@ -151,7 +158,7 @@ ssize_t  pm_wrapper_dbw_io(PMEM_WRAPPER* pmw,
 
 
 /////// PMEM BUF  //////////////////////
-
+#if defined (UNIV_PMEMOBJ_BUF)
 //This struct is used only for POBJ_LIST_INSERT_NEW_HEAD
 //modify this struct according to struct __pmem_buf_block_t
 struct list_constr_args{
@@ -210,6 +217,7 @@ struct __pmem_buf_block_list_t {
 	size_t				n_flush; //number of flush
 	int					check;
 	ulint				last_time;
+	
 };
 
 struct __pmem_buf_free_pool {
@@ -241,6 +249,7 @@ struct __pmem_buf {
 	//Those varables are in DRAM
 	os_event_t*  flush_events; //N flush events for N buckets
 	os_event_t free_pool_event; //event for free_pool
+	PMEM_AIO_PARAM** params_arr;
 };
 
 #if defined(UNIV_PMEMOBJ_BUF_STAT)
@@ -308,6 +317,7 @@ pm_buf_flush_list(PMEMobjpool* pop, PMEM_BUF* buf, PMEM_BUF_BLOCK_LIST* plist);
 
 void
 pm_buf_flush_list_v2(PMEMobjpool* pop, PMEM_BUF* buf, PMEM_LIST_CLEANER_SLOT* slot);
+
 
 void
 pm_buf_write_aio_complete(PMEMobjpool* pop, PMEM_BUF* buf, TOID(PMEM_BUF_BLOCK)* ptoid_block);
@@ -444,6 +454,6 @@ pm_buf_flush_list_cleaner_disabled_loop(void);
 	hashed = key ^ PMEM_HASH_MASK;\
 	hashed = hashed % n;\
 }while(0)
-
+#endif //UNIV_PMEMOBJ_BUF
 
 #endif /*__PMEMOBJ_H__ */

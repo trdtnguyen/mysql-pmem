@@ -91,7 +91,11 @@ bool	innodb_calling_exit;
 #include <mysql/service_mysql_keyring.h>
 
 #if defined (UNIV_PMEMOBJ_BUF)
+#include "my_pmem_common.h"
 static FILE* df = fopen("debug.txt", "w");
+
+struct pm_seg_wrapper;
+typedef struct pm_seg_wrapper PMEM_SEG_WRAPPER;
 #endif
 
 /** Insert buffer segment id */
@@ -317,7 +321,11 @@ public:
 
 	/** Destructor */
 	~AIO();
-
+#if defined (UNIV_PMEMOBJ_BUF)
+	PMEM_SEG_WRAPPER * get_seg_wrapper(){
+		return m_seg_wrapper_arr;
+	}
+#endif
 	/** Initialize the instance
 	@return DB_SUCCESS or error code */
 	dberr_t init();
@@ -347,7 +355,12 @@ public:
 		os_offset_t	offset,
 		ulint		len)
 		MY_ATTRIBUTE((warn_unused_result));
-
+#if defined (UNIV_PMEMOBJ_BUF)
+dberr_t pm_process_batch(
+		PMEM_AIO_PARAM* params,
+		uint64_t	n_params)
+		MY_ATTRIBUTE((warn_unused_result));
+#endif 
 	/** @return number of reserved slots */
 	ulint pending_io_count() const;
 
@@ -723,10 +736,34 @@ private:
 
 	/** Writes */
 	static AIO*		s_writes;
+#if defined (UNIV_PMEMOBJ_BUF)
+	/** PMEM batch Writes */
+	static AIO**		s_pm_batch_writes;
+	static uint64_t		n_batch;
+	PMEM_SEG_WRAPPER* m_seg_wrapper_arr;
+
+	ulint		m_n_seg_reserved;
+	os_event_t	m_seg_is_empty;
+	os_event_t	m_seg_not_full;
+
+#endif
 
 	/** Synchronous I/O */
 	static AIO*		s_sync;
+	
 };
+
+#if defined (UNIV_PMEMOBJ_BUF)
+struct pm_seg_wrapper {
+	ulint			local_index;
+	ulint			io_finished;
+	ulint			io_pending;
+	bool			is_reserved;
+	struct iocb**	ppiocb;		
+	//Debug
+	ulint			list_id;
+};
+#endif
 
 /** Static declarations */
 AIO*	AIO::s_reads;
@@ -734,6 +771,9 @@ AIO*	AIO::s_writes;
 AIO*	AIO::s_ibuf;
 AIO*	AIO::s_log;
 AIO*	AIO::s_sync;
+#if defined (UNIV_PMEMOBJ_BUF)
+AIO**	AIO::s_pm_batch_writes;
+#endif
 
 #if defined(LINUX_NATIVE_AIO)
 /** timeout for each io_getevents() call = 500ms. */
@@ -1592,6 +1632,31 @@ AIO::release(Slot* slot)
 
 	--m_n_reserved;
 
+#if defined (UNIV_PMEMOBJ_BUF)	
+	if (   !slot->type.is_log() &&
+			slot->type.is_write()) {
+		ulint local_seg = (slot->pos * m_n_segments) / m_slots.size();
+
+		PMEM_SEG_WRAPPER* wrapper_arr = get_seg_wrapper();
+		PMEM_SEG_WRAPPER* wrapper = &wrapper_arr[local_seg];
+		++wrapper->io_finished;
+		if (wrapper->io_finished == wrapper->io_pending) {
+			wrapper->io_finished = wrapper->io_pending = 0;
+			wrapper->is_reserved = false;
+			--m_n_seg_reserved;
+#if defined (UNIV_PMEMOBJ_BUF_DEBUG)
+			printf("PMEM_DEBUG: complete wrapper %zu (handle list %zu) \n", wrapper->local_index, wrapper->list_id);
+#endif
+			if (m_n_seg_reserved == m_n_segments - 1) {
+				os_event_set(m_seg_not_full);
+			}
+			if (m_n_seg_reserved == 0) {
+				os_event_set(m_seg_is_empty);
+			}
+		}
+	}
+#endif //UNIV_PMEMOBJ_BUF
+
 	if (m_n_reserved == m_slots.size() - 1) {
 		os_event_set(m_not_full);
 	}
@@ -2313,7 +2378,9 @@ private:
 	The IO-thread also exits in this function. It checks server status at
 	each wakeup and that is why we use timed wait in io_getevents(). */
 	void collect();
-
+#if defined (UNIV_PMEMOBJ_BUF)
+	bool is_write_thread();
+#endif
 private:
 	/** Slot array */
 	AIO*			m_array;
@@ -2474,7 +2541,15 @@ LinuxAIOHandler::find_completed_slot(ulint* n_pending)
 
 	return(NULL);
 }
-
+#if defined (UNIV_PMEMOBJ_BUF)
+bool 
+LinuxAIOHandler::is_write_thread(){
+	ulint   start = (srv_read_only_mode) ? 0 : 2;
+	bool is_write = (m_segment >= (start + srv_n_read_io_threads) && m_segment < (start + srv_n_read_io_threads +
+				srv_n_write_io_threads));
+	return is_write;
+}
+#endif
 /** This function is only used in Linux native asynchronous i/o. This is
 called from within the io-thread. If there are no completed IO requests
 in the slot array, the thread calls this function to collect more
@@ -2491,7 +2566,6 @@ LinuxAIOHandler::collect()
 	ut_ad(m_n_slots > 0);
 	ut_ad(m_array != NULL);
 	ut_ad(m_segment < m_array->get_n_segments());
-
 	/* Which io_context we are going to use. */
 	io_context*	io_ctx = m_array->io_ctx(m_segment);
 
@@ -6377,6 +6451,28 @@ AIO::AIO(
 #endif /* LINUX_NATIVE_AIO */
 
 	os_event_set(m_is_empty);
+#if defined (UNIV_PMEMOBJ_BUF)
+	m_seg_not_full = os_event_create("aio_seg_not_full");
+	m_seg_is_empty = os_event_create("aio_seg_is_empty");
+	os_event_set(m_seg_is_empty);
+	
+	m_n_seg_reserved = 0;
+	ulint slots_per_seg = m_slots.size() / m_n_segments;
+
+	m_seg_wrapper_arr = static_cast <PMEM_SEG_WRAPPER*> (
+			calloc(m_n_segments, sizeof(PMEM_SEG_WRAPPER)));
+
+	for (ulint i = 0; i < m_n_segments; ++i) {
+		m_seg_wrapper_arr[i].local_index = i;
+		m_seg_wrapper_arr[i].io_finished = 0;
+		m_seg_wrapper_arr[i].io_pending = 0;
+		m_seg_wrapper_arr[i].is_reserved = false;
+
+		m_seg_wrapper_arr[i].ppiocb = static_cast<struct iocb**> (
+			calloc(slots_per_seg, sizeof(struct iocb*)));
+	}
+
+#endif 
 }
 
 /** Initialise the slots */
@@ -6529,6 +6625,15 @@ AIO::~AIO()
 
 	os_event_destroy(m_not_full);
 	os_event_destroy(m_is_empty);
+#if defined (UNIV_PMEMOBJ_BUF)
+	os_event_destroy(m_seg_not_full);
+	os_event_destroy(m_seg_is_empty);
+
+	for (ulint i = 0; i < m_n_segments; ++i) {
+		ut_free(m_seg_wrapper_arr[i].ppiocb);
+	}
+	ut_free(m_seg_wrapper_arr);
+#endif
 
 #if defined(LINUX_NATIVE_AIO)
 	if (srv_use_native_aio) {
@@ -6788,7 +6893,11 @@ os_aio_init(
 	ulint		n_slots_sync)
 {
 	/* Maximum number of pending aio operations allowed per segment */
+#if defined (UNIV_PMEMOBJ_BUF)
+	ulint		limit = srv_pmem_buf_bucket_size;
+#else //original
 	ulint		limit = 8 * OS_AIO_N_PENDING_IOS_PER_THREAD;
+#endif
 
 #ifdef _WIN32
 	if (srv_use_native_aio) {
@@ -7162,6 +7271,159 @@ AIO::reserve_slot(
 	return(slot);
 }
 
+#if defined (UNIV_PMEMOBJ_BUF)
+/*
+ * Only work for native Linux AIO
+ * */
+dberr_t 
+AIO::pm_process_batch(
+		PMEM_AIO_PARAM* params,
+		uint64_t	n_params) {
+	
+	ulint i;
+	ulint slot_i;
+	ulint		slots_per_seg;
+
+	slots_per_seg = slots_per_segment();
+	ulint		local_seg;
+	ulint		io_ctx_index;
+	
+	//we do not handle those types: compressed, encrypted
+	ulint type = IORequest::PM_WRITE;
+	IORequest request(type);
+
+	assert (n_params <= slots_per_seg);
+	assert(srv_use_native_aio);
+	assert(!request.is_encrypted() && !request.is_compressed());
+
+	//Wait in case current array is full
+	for (;;) {
+
+		acquire();
+
+		//if (m_n_reserved != m_slots.size()) {
+		//	break;
+		//}
+		if (m_n_seg_reserved < m_n_segments) {
+			break;
+		}
+
+		release();
+
+		//os_event_wait(m_not_full);
+		os_event_wait(m_seg_not_full);
+	}
+	// Now this thread has already acquired the lock
+	Slot*	slot = NULL;
+
+	//Find the first free segment
+	local_seg = m_n_segments + 1;
+	for (i = 0; i < m_n_segments; ++i) {
+		if (m_seg_wrapper_arr[i].is_reserved == false) {
+			local_seg = i;
+			m_seg_wrapper_arr[i].is_reserved = true;
+			++m_n_seg_reserved;
+
+			if (m_n_seg_reserved == 1) {
+				os_event_reset(m_seg_is_empty);
+			}
+
+			if (m_n_seg_reserved == m_n_segments) {
+				os_event_reset(m_seg_not_full);
+			}
+			break;
+		}
+	}
+	//If there is a free lot in this array than there is at least one free segment 	
+	if (local_seg > m_n_segments){
+		printf("PMEM_ERROR: local_seg = %zu > m_n_segments = %zu, m_n_seg_reserved = %zu, m_n_reserved=%zu / %zu \n", local_seg, m_n_segments, m_n_seg_reserved, m_n_reserved, m_slots.size());
+		assert(local_seg < m_n_segments);
+	}
+
+	PMEM_SEG_WRAPPER* wrapper = &m_seg_wrapper_arr[local_seg];
+	assert (wrapper->local_index == local_seg);
+	wrapper->io_pending = 0;
+	
+	for (i = 0, slot_i = local_seg * slots_per_seg;
+		   	i < n_params && slot_i < m_slots.size();
+		   	++slot_i, ++i) {
+		
+		//(1) Scan to find a free slot
+		//slot_i %= m_slots.size();
+		slot = at(slot_i);
+		
+		assert(slot->is_reserved == false);	
+
+		os_offset_t offset = params[i].offset;
+		//Found a free slot
+		++m_n_reserved;
+
+		//if (m_n_reserved == 1) {
+		//	os_event_reset(m_is_empty);
+		//}
+
+		//if (m_n_reserved == m_slots.size()) {
+		//	os_event_reset(m_not_full);
+		//}
+		//(2) Assign data in slot
+		slot->is_reserved = true;
+		slot->reservation_time = ut_time();
+		slot->m1       = params[i].m1;
+		slot->m2       = params[i].m2;
+		slot->file     = params[i].file;
+		slot->name     = params[i].name;
+		slot->len      = params[i].n;
+		slot->type     = request;
+		slot->buf      = static_cast<byte*>(params[i].buf);
+		slot->ptr      = slot->buf;
+		slot->offset   = offset;
+		slot->err      = DB_SUCCESS;
+		slot->original_len = static_cast<uint32>(params[i].n);
+		slot->io_already_done = false;
+		slot->buf_block = NULL;
+		
+		//(3) Prepare pwrite
+		off_t		aio_offset;
+		/* Check if we are dealing with 64 bit arch.
+		If not then make sure that offset fits in 32 bits. */
+		aio_offset = (off_t) offset;
+
+		ut_a(sizeof(aio_offset) >= sizeof(offset)
+		     || ((os_offset_t) aio_offset) == offset);
+
+		struct iocb*	iocb = &slot->control;
+		wrapper->ppiocb[i] = iocb;
+		++wrapper->io_pending;
+
+		io_prep_pwrite(
+				iocb, params[i].file.m_file, slot->ptr, slot->len, aio_offset);
+
+		iocb->data = slot;
+
+		slot->n_bytes = 0;
+		slot->ret = 0;
+
+		//next param
+	} //end for
+
+	//AIO Submit in batch 
+	io_ctx_index = local_seg;
+	int ret = io_submit(
+			m_aio_ctx[io_ctx_index],
+			wrapper->io_pending,
+			wrapper->ppiocb);
+
+	release();
+	
+	if (ret == wrapper->io_pending)
+		return DB_SUCCESS;
+	else {
+		printf("PMEM_ERROR: io_submit in batch just partly complete %d / %zu aios\n", ret, wrapper->io_pending);
+		return(DB_IO_ERROR);
+	}
+
+}
+#endif
 /** Wakes up a simulated aio i/o-handler thread if it has something to do.
 @param[in]	global_segment	The number of the segment in the AIO arrays */
 void
@@ -7653,6 +7915,111 @@ err_exit:
 	return(DB_IO_ERROR);
 }
 
+#if defined (UNIV_PMEMOBJ_BUF)
+/*
+ * Submit AIO in batch
+ * One write IO thread handle a segment in s_writes array that support 256 Slots
+ * We use one segment for all pages in a sublist
+ * offset -> local_segment 
+ * params [in]: array of AIO parameters, each param is assigned to a AIO Slot
+ * n_params [in]: number of parameters
+ * */
+dberr_t
+os_aio_batch_func(
+		PMEM_AIO_PARAM* params,
+	   	uint64_t n_params
+		)
+{
+	ulint type = IORequest::PM_WRITE;
+	IORequest request(type);
+	ulint	mode = OS_AIO_NORMAL; //we only do the OS_AIO_NORMAL 
+
+//try_again:
+	AIO*	array;
+	array = AIO::select_slot_array(request, false, mode);
+	
+	//Find the first free segment in array, reserve slots in batch 
+	dberr_t err = array->pm_process_batch(params, n_params);
+
+	os_n_file_writes += n_params;
+
+	return err;
+
+//err_exit:
+	//Slot* slot;	
+	//ulint slot_i;
+	
+	//array->acquire();
+	//for (i = 0, slot_i = wrapper->local_index * slots_per_seg;
+	//		i < wrapper->size && slot_i < n ; ++slots_i, ++i) {
+	//	slot = array->at(slot_i); 
+	//	array->release(slot);
+	//}	
+	//array->release();
+	//if (os_file_handle_error(name, "aio write")) {
+	//	goto try_again;
+	//}
+		
+//	IORequest&	type;
+//	ulint		mode;
+//	const char*	name;
+//	pfs_os_file_t	file;
+//	void*		buf;
+//	os_offset_t	offset;
+//	ulint		n;
+//	bool		read_only;
+//	fil_node_t*	m1;
+//	void*		m2;
+//
+//	ut_ad(n > 0);
+//	ut_ad((n % OS_FILE_LOG_BLOCK_SIZE) == 0);
+//	ut_ad((offset % OS_FILE_LOG_BLOCK_SIZE) == 0);
+//	ut_ad(os_aio_validate_skip());
+//
+//try_again:
+//
+//	AIO*	array;
+//
+//	array = AIO::select_slot_array(type, read_only, mode);
+//
+//	Slot*	slot;
+//
+//	slot = array->reserve_slot(type, m1, m2, file, name, buf, offset, n);
+//
+//	if (type.is_write()) {
+//		if (srv_use_native_aio) {
+//			++os_n_file_writes;
+//
+//			if (!array->linux_dispatch(slot)) {
+//				goto err_exit;
+//			}
+//
+//		} else if (type.is_wake()) {
+//			AIO::wake_simulated_handler_thread(
+//				AIO::get_segment_no_from_slot(array, slot));
+//		}
+//	} else {
+//		ut_error;
+//	}
+//
+//
+//	/* AIO request was queued successfully! */
+//	return(DB_SUCCESS);
+//
+//#if defined LINUX_NATIVE_AIO || defined WIN_ASYNC_IO
+//err_exit:
+//#endif /* LINUX_NATIVE_AIO || WIN_ASYNC_IO */
+//
+//	array->release_with_mutex(slot);
+//	if (os_file_handle_error(
+//		name, type.is_read() ? "aio read" : "aio write")) {
+//
+//		goto try_again;
+//	}
+
+	//return(DB_IO_ERROR);
+}
+#endif
 /** Simulated AIO handler for reaping IO requests */
 class SimulatedAIOHandler {
 
