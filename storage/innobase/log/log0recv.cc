@@ -4294,12 +4294,10 @@ recv_recovery_from_checkpoint_start(
 	log_sys->next_checkpoint_no = checkpoint_no + 1;
 
 #if defined(UNIV_PMEMOBJ_LOG)
-	printf("[PMEMOBJ_LOG] Debug here\n");
-	ulint len = gb_pmw->plogbuf->buf_free - log_sys->buf_free;
-	ulint d_lsn = gb_pmw->plogbuf->lsn - log_sys->lsn;
-
-	if (d_lsn > 0 && len > 0) {
-
+	if (	gb_pmw->plogbuf->buf_free > log_sys->buf_free &&
+			gb_pmw->plogbuf->lsn > log_sys->lsn ) {
+		uint64_t len = gb_pmw->plogbuf->buf_free - log_sys->buf_free;
+		uint64_t d_lsn = gb_pmw->plogbuf->lsn - log_sys->lsn;
 		printf("[PMEMOBJ_INFO]!!!!!!!  Migration persistent log buffer to D-RAM log buffer and make the D-RAM log buffer persist\n");
 		//If the pmem log buffer is newer than current log buffer, we have more work to do
 		byte* p_old = (byte*) pm_wrapper_logbuf_get_logdata(gb_pmw);

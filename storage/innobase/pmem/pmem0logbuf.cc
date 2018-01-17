@@ -124,7 +124,7 @@ ssize_t  pm_wrapper_logbuf_io(PMEM_WRAPPER* pmw,
 							void* buf, 
 							const uint64_t offset,
 							unsigned long int n){
-	unsigned long int ret_bytes;
+	unsigned long int ret_bytes = 0;
 		assert(pmw);
 		if(!pmw->plogbuf){
 			printf("PMEMOBJ_ERROR pmw->plogbuf has not allocated \n");

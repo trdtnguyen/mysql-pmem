@@ -201,13 +201,16 @@ extern bool		trx_commit_disallowed;
 #endif /* UNIV_DEBUG */
 
 /*------------------------- LOG FILES ------------------------ */
+#if defined(UNIV_PMEMOBJ_BUF) || defined (UNIV_AIO_IMPROVE)
+ulong	srv_pmem_buf_bucket_size	= 256;
+#endif 
+
 #if defined(UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_LOG) 
 char*	srv_pmem_home_dir	= NULL;
 ulong	srv_pmem_pool_size	= 8 * 1024;
 ulong	srv_pmem_buf_size	= 4 * 1024;
 double	srv_pmem_buf_used_free_ratio	= 0.5;
 ulong	srv_pmem_buf_n_buckets	= 128;
-ulong	srv_pmem_buf_bucket_size	= 256;
 double	srv_pmem_buf_flush_pct	= 0.9;
 #endif
 char*	srv_log_group_home_dir	= NULL;

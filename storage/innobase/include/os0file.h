@@ -1502,7 +1502,7 @@ pfs_os_aio_func(
 	const char*	src_file,
 	ulint		src_line);
 
-#if defined (UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_LOG)
+#if defined (UNIV_PMEMOBJ_BUF)  
 struct __pmem_aio_param;
 typedef struct __pmem_aio_param PMEM_AIO_PARAM;
 

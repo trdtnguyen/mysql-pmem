@@ -1089,7 +1089,8 @@ buf_flush_write_block_low(
 	int ret = pm_buf_write(gb_pmw->pop, gb_pmw->pbuf, bpage->id, bpage->size, frame, sync);
 	assert(ret == PMEM_SUCCESS);
 	//we remove this page from LRU
-	assert(buf_page_io_complete(bpage,true));
+	//assert(buf_page_io_complete(bpage,true));
+	assert(buf_page_io_complete(bpage,sync));
 	goto skip_write_and_fsync;
 
 	//if (gb_pmw->pbuf->is_async_only) {
@@ -4297,7 +4298,8 @@ DECLARE_THREAD(pm_buf_flush_list_cleaner_coordinator)(
 
 	while (srv_shutdown_state == SRV_SHUTDOWN_NONE) {
 		os_thread_sleep(10000000);
-		printf("PMEM_INFO: free_pool cur_lists=%zu \n", D_RW(gb_pmw->pbuf->free_pool)->cur_lists );
+		if (gb_pmw->pbuf)
+			printf("PMEM_INFO: free_pool cur_lists=%zu \n", D_RW(gb_pmw->pbuf->free_pool)->cur_lists );
 
 		if (srv_shutdown_state != SRV_SHUTDOWN_NONE) {
 			break;

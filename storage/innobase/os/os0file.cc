@@ -224,9 +224,13 @@ mysql_pfs_key_t  innodb_temp_file_key;
 
 /** The asynchronous I/O context */
 struct Slot {
+#if defined (UNIV_PMEMOBJ_BUF) || defined(UNIV_AIO_IMPROVE)
+	/** index of the slot in the aio array */
+	uint32_t		pos;
+#else
 	/** index of the slot in the aio array */
 	uint16_t		pos;
-
+#endif
 	/** true if this slot is reserved */
 	bool			is_reserved;
 
@@ -2609,8 +2613,14 @@ LinuxAIOHandler::collect()
 			ut_a(slot->is_reserved);
 
 			/* We are not scribbling previous segment. */
+#if defined (UNIV_PMEMOBJ_BUF)
+			if (slot->pos < start_pos){
+				printf("PMEM_ERROR: m_segment=%zu, m_n_slots=%zu, start_pos = %zu, end_pos=%zu\n", m_segment, m_n_slots, start_pos, end_pos);
+				assert(0);
+			}
+#else
 			ut_a(slot->pos >= start_pos);
-
+#endif
 			/* We have not overstepped to next segment. */
 			ut_a(slot->pos < end_pos);
 
@@ -6481,9 +6491,11 @@ AIO::init_slots()
 {
 	for (ulint i = 0; i < m_slots.size(); ++i) {
 		Slot&	slot = m_slots[i];
-
+#if defined (UNIV_PMEMOBJ_BUF) || defined (UNIV_AIO_IMPROVE)
+		slot.pos = static_cast<uint32_t>(i);
+#else
 		slot.pos = static_cast<uint16_t>(i);
-
+#endif 
 		slot.is_reserved = false;
 
 #ifdef WIN_ASYNC_IO
@@ -6630,9 +6642,9 @@ AIO::~AIO()
 	os_event_destroy(m_seg_is_empty);
 
 	for (ulint i = 0; i < m_n_segments; ++i) {
-		ut_free(m_seg_wrapper_arr[i].ppiocb);
+		free(m_seg_wrapper_arr[i].ppiocb);
 	}
-	ut_free(m_seg_wrapper_arr);
+	free(m_seg_wrapper_arr);
 #endif
 
 #if defined(LINUX_NATIVE_AIO)
@@ -6893,7 +6905,7 @@ os_aio_init(
 	ulint		n_slots_sync)
 {
 	/* Maximum number of pending aio operations allowed per segment */
-#if defined (UNIV_PMEMOBJ_BUF)
+#if defined (UNIV_PMEMOBJ_BUF) || defined (UNIV_AIO_IMPROVE)
 	ulint		limit = srv_pmem_buf_bucket_size;
 #else //original
 	ulint		limit = 8 * OS_AIO_N_PENDING_IOS_PER_THREAD;
@@ -7308,8 +7320,9 @@ AIO::pm_process_batch(
 			break;
 		}
 
-		release();
+		//printf("PMEM_INFO all segs are full, m_n_seg_reserved=%zu/%zu, wait for a aio seg free...\n", m_n_seg_reserved, m_n_segments);
 
+		release();
 		//os_event_wait(m_not_full);
 		os_event_wait(m_seg_not_full);
 	}
@@ -7343,7 +7356,7 @@ AIO::pm_process_batch(
 	PMEM_SEG_WRAPPER* wrapper = &m_seg_wrapper_arr[local_seg];
 	assert (wrapper->local_index == local_seg);
 	wrapper->io_pending = 0;
-	
+
 	for (i = 0, slot_i = local_seg * slots_per_seg;
 		   	i < n_params && slot_i < m_slots.size();
 		   	++slot_i, ++i) {
@@ -7351,7 +7364,7 @@ AIO::pm_process_batch(
 		//(1) Scan to find a free slot
 		//slot_i %= m_slots.size();
 		slot = at(slot_i);
-		
+
 		assert(slot->is_reserved == false);	
 
 		os_offset_t offset = params[i].offset;

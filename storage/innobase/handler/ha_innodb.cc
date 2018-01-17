@@ -3699,6 +3699,12 @@ innobase_init(
 	/* -------------- All log files ---------------------------*/
 
 	/* The default dir for log files is the datadir of MySQL */
+#if defined(UNIV_PMEMOBJ_BUF) || defined(UNIV_AIO_IMPROVE)
+	if (!srv_pmem_buf_bucket_size) {
+		srv_pmem_buf_bucket_size = 256;
+	}
+#endif 
+
 #if defined(UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_LOG)
 	if (!srv_pmem_home_dir) {
 		srv_pmem_home_dir = (char*) "/mnt/pmem1";
@@ -3714,9 +3720,6 @@ innobase_init(
 	}
 	if (!srv_pmem_buf_n_buckets) {
 		srv_pmem_buf_n_buckets = 128;
-	}
-	if (!srv_pmem_buf_bucket_size) {
-		srv_pmem_buf_bucket_size = 256;
 	}
 	if (!srv_pmem_buf_flush_pct) {
 		srv_pmem_buf_flush_pct = 0.9; 
@@ -19471,6 +19474,13 @@ static MYSQL_SYSVAR_BOOL(locks_unsafe_for_binlog, innobase_locks_unsafe_for_binl
   " Force InnoDB to not use next-key locking, to use only row-level locking.",
   NULL, NULL, FALSE);
 
+#if defined(UNIV_PMEMOBJ_BUF) || defined(UNIV_AIO_IMPROVE)
+static MYSQL_SYSVAR_ULONG(pmem_buf_bucket_size, srv_pmem_buf_bucket_size,
+  PLUGIN_VAR_RQCMDARG | PLUGIN_VAR_READONLY,
+  "Size of buckets (number of pages), from 1 to 65536, default is 256.",
+  NULL, NULL, 256, 1, 65536, 0);
+#endif 
+
 #if defined (UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_LOG) 
 static MYSQL_SYSVAR_STR(pmem_home_dir, srv_pmem_home_dir,
   PLUGIN_VAR_RQCMDARG | PLUGIN_VAR_READONLY,
@@ -19491,10 +19501,6 @@ static MYSQL_SYSVAR_ULONG(pmem_buf_n_buckets, srv_pmem_buf_n_buckets,
   PLUGIN_VAR_RQCMDARG | PLUGIN_VAR_READONLY,
   "Number of buckets in the partition, from 1 to 1024, default is 128.",
   NULL, NULL, 128, 1, 1024,0);
-static MYSQL_SYSVAR_ULONG(pmem_buf_bucket_size, srv_pmem_buf_bucket_size,
-  PLUGIN_VAR_RQCMDARG | PLUGIN_VAR_READONLY,
-  "Size of buckets (number of pages), from 1 to 4096, default is 256.",
-  NULL, NULL, 256, 1, 4096, 0);
 static MYSQL_SYSVAR_DOUBLE(pmem_buf_flush_pct, srv_pmem_buf_flush_pct,
   PLUGIN_VAR_RQCMDARG | PLUGIN_VAR_READONLY,
   "Threshold to flush a sub-list, from 0.1 to 1, default is 0.9",
@@ -20308,13 +20314,15 @@ static struct st_mysql_sys_var* innobase_system_variables[]= {
   MYSQL_SYSVAR(log_file_size),
   MYSQL_SYSVAR(log_files_in_group),
   MYSQL_SYSVAR(log_write_ahead_size),
+#if defined (UNIV_PMEMOBJ_BUF) || defined(UNIV_AIO_IMPROVE)
+  MYSQL_SYSVAR(pmem_buf_bucket_size),
+#endif
 #if defined (UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_LOG) 
   MYSQL_SYSVAR(pmem_home_dir),
   MYSQL_SYSVAR(pmem_pool_size),
   MYSQL_SYSVAR(pmem_buf_size),
   MYSQL_SYSVAR(pmem_buf_used_free_ratio),
   MYSQL_SYSVAR(pmem_buf_n_buckets),
-  MYSQL_SYSVAR(pmem_buf_bucket_size),
   MYSQL_SYSVAR(pmem_buf_flush_pct),
 #endif
   MYSQL_SYSVAR(log_group_home_dir),
