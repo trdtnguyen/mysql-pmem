@@ -6123,7 +6123,7 @@ pm_fil_io_batch(
 
 		req_type.block_size(node->block_size);
 
-		//capture the aio request 
+		//capture the aio request, this block replace os_aio() 
 		params[n_params].name = node->name;
 		params[n_params].file = node->handle;
 		params[n_params].buf = buf;
@@ -6132,6 +6132,7 @@ pm_fil_io_batch(
 		params[n_params].m1 = node;
 		params[n_params].m2 = message;
 		++n_params;
+
 		//next block
 	} //end for
 
@@ -6402,7 +6403,80 @@ skip_flush:
 
 	mutex_exit(&fil_system->mutex);
 }
+#if defined (UNIV_PMEMOBJ_BUF)
 
+/*
+ *This function used in pm_handle_finished_block
+ When all pages in a list are finished AIO, we reset it. Before return this page to the free_pool, we call fsync() for all spaces in this list
+ See fil_flush_file_spaces() in fil/fil0fil.cc
+ * */
+void
+pm_buf_flush_spaces_in_list(
+		void*	pop_in,
+	   	void*	buf_in,
+	   	void*	pflush_list_in){
+	
+	PMEMobjpool* pop = static_cast<PMEMobjpool*> (pop_in);
+	PMEM_BUF* buf = static_cast<PMEM_BUF*> (buf_in);
+	PMEM_BUF_BLOCK_LIST* pflush_list = static_cast<PMEM_BUF_BLOCK_LIST*> (pflush_list_in);
+	PMEM_BUF_BLOCK* pblock;
+
+	ulint		i;	
+	fil_space_t*	space;
+	ulint*		space_ids;
+	ulint		n_space_ids;
+
+	assert(pop);
+	assert(buf);
+	assert(pflush_list);
+
+	ulint type = IORequest::PM_WRITE;
+	IORequest		req_type(type);
+
+	mutex_enter(&fil_system->mutex);
+	
+	space_ids = static_cast<ulint*> (
+		ut_malloc_nokey(pflush_list->max_pages * sizeof(*space_ids)));
+
+	n_space_ids = 0;	
+
+	for (i = 0; i < pflush_list->max_pages; i++) {
+		pblock = D_RW(D_RW(pflush_list->arr)[i]);
+
+		ulint space_id = pblock->id.space();
+		space =fil_space_get_by_id(space_id);
+
+		if (space->purpose == FIL_TYPE_TABLESPACE &&
+		     !space->stop_new_ops &&
+			 !space->is_being_truncated) {
+
+			space_ids[n_space_ids++] = space_id;	
+		}
+		//space_ids[n_space_ids++] =D_RW(D_RW(pflush_list->arr)[i])->id.space();
+
+		//if (pblock->sync) {
+			fil_node_t* node = UT_LIST_GET_FIRST(space->chain);
+			/* The i/o operation is already completed when we return from
+os_aio: */
+		//	mutex_enter(&fil_system->mutex);
+
+			fil_node_complete_io(node, fil_system, req_type);
+
+		//	mutex_exit(&fil_system->mutex);
+
+			ut_ad(fil_validate_skip());
+		//}
+	}
+
+	mutex_exit(&fil_system->mutex);
+
+	for (ulint i = 0; i < n_space_ids; i++) {
+		fil_flush(space_ids[i]);
+	}
+	ut_free(space_ids);
+
+}
+#endif 
 /** Flush to disk the writes in file spaces of the given type
 possibly cached by the OS.
 @param[in]	purpose	FIL_TYPE_TABLESPACE or FIL_TYPE_LOG */

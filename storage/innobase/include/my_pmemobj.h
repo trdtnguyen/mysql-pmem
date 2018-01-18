@@ -224,6 +224,7 @@ struct __pmem_buf_free_pool {
 	PMEMrwlock			lock;
 	POBJ_LIST_HEAD(list_list, PMEM_BUF_BLOCK_LIST) head;
 	size_t				cur_lists;
+	size_t				max_lists;
 };
 
 struct __pmem_buf {

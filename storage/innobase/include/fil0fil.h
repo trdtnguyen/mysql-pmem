@@ -1234,6 +1234,12 @@ pm_fil_io_batch(
 		void*				pop_in,
 		void*				pmem_buf_in,
 		void*				plist_in);
+
+void
+pm_buf_flush_spaces_in_list(
+		void* pop_in,
+	   	void* buf_in,
+	   	void* flush_list_in);
 #endif
 /**********************************************************************//**
 Waits for an aio operation to complete. This function is used to write the

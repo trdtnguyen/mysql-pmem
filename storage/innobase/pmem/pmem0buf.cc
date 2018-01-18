@@ -291,6 +291,7 @@ pm_buf_list_init(PMEMobjpool*	pop,
 		assert(0);
 	}
 	pfreepool = D_RW(buf->free_pool);
+	pfreepool->max_lists = n_lists_in_free_pool;
 	pfreepool->cur_lists = 0;
 	
 	for(i = 0; i < n_lists_in_free_pool; i++) {
@@ -862,9 +863,10 @@ pm_buf_flush_list_v2(PMEMobjpool* pop, PMEM_BUF* buf, PMEM_LIST_CLEANER_SLOT* sl
 }
 
 
-
 /*
  *This function is called from aio complete (fil_aio_wait)
+ (1) Reset the list
+ (2) Flush spaces in this list
  * */
 void
 pm_handle_finished_block(PMEMobjpool* pop, PMEM_BUF* buf, PMEM_BUF_BLOCK* pblock){
@@ -888,7 +890,9 @@ pm_handle_finished_block(PMEMobjpool* pop, PMEM_BUF* buf, PMEM_BUF_BLOCK* pblock
 	//if (pflush_list->n_aio_pending == 0) {
 	if (pflush_list->n_aio_pending + pflush_list->n_sio_pending == 0) {
 		//Now all pages in this list are persistent in disk
-		
+		//(0) flush spaces
+		//pm_buf_flush_spaces_in_list(pop, buf, pflush_list);
+
 		//(1) Reset blocks in the list
 		ulint i;
 		for (i = 0; i < pflush_list->max_pages; i++) {

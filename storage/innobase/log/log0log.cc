@@ -57,7 +57,7 @@ Created 12/9/1995 Heikki Tuuri
 #include "sync0sync.h"
 #endif /* !UNIV_HOTBACKUP */
 
-#if defined(UNIV_PMEMOBJ_LOG)
+#if defined(UNIV_PMEMOBJ_LOG) || defined(UNIV_PMEMOBJ_BUF)
 #include "my_pmemobj.h"
 
 extern PMEM_WRAPPER* gb_pmw;
@@ -2334,6 +2334,20 @@ loop:
 
 		goto loop;
 	}
+#if defined (UNIV_PMEMOBJ_BUF)
+	//Wait for PMEM buf finish
+	PMEM_BUF_FREE_POOL* pfree_pool = D_RW(gb_pmw->pbuf->free_pool);
+	pending_io = pfree_pool->max_lists - pfree_pool->cur_lists;
+		if (pending_io) {
+			if (srv_print_verbose_log && count > 600) {
+				ib::info() << "Waiting for " << pending_io << " PMEM lists "
+					" to complete";
+				count = 0;
+			}
+
+			goto loop;
+		}	
+#endif 
 
 	if (srv_fast_shutdown == 2) {
 		if (!srv_read_only_mode) {
