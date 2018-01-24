@@ -844,16 +844,11 @@ buf_dblwr_update(
 		gb_pmw->pdbw->b_first_free--;
 #endif
 		if (buf_dblwr->b_reserved == 0) {
-#if defined (UNIV_PMEMOBJ_DBW)
-			//We don't need to flush double write buffer pages to disk
-			//Do nothing here
-#else //original
 			mutex_exit(&buf_dblwr->mutex);
 			/* This will finish the batch. Sync data files
 			to the disk. */
 			fil_flush_file_spaces(FIL_TYPE_TABLESPACE);
 			mutex_enter(&buf_dblwr->mutex);
-#endif /* UNIV_PMEMOBJ_DBW */
 			/* We can now reuse the doublewrite memory buffer: */
 			buf_dblwr->first_free = 0;
 			buf_dblwr->batch_running = false;

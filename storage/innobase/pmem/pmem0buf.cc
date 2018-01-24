@@ -891,7 +891,7 @@ pm_handle_finished_block(PMEMobjpool* pop, PMEM_BUF* buf, PMEM_BUF_BLOCK* pblock
 	if (pflush_list->n_aio_pending + pflush_list->n_sio_pending == 0) {
 		//Now all pages in this list are persistent in disk
 		//(0) flush spaces
-		//pm_buf_flush_spaces_in_list(pop, buf, pflush_list);
+		pm_buf_flush_spaces_in_list(pop, buf, pflush_list);
 
 		//(1) Reset blocks in the list
 		ulint i;
@@ -972,8 +972,15 @@ pm_buf_read(PMEMobjpool* pop, PMEM_BUF* buf, const page_id_t page_id, const page
 	byte* pdata;
 	//size_t bytes_read;
 	
-	assert(buf);
-	assert(data);
+	if (buf == NULL){
+		printf("PMEM_ERROR, param buf is null in pm_buf_read\n");
+		assert(0);
+	}
+
+	if (data == NULL){
+		printf("PMEM_ERROR, param data is null in pm_buf_read\n");
+		assert(0);
+	}
 	//bytes_read = 0;
 
 	PMEM_HASH_KEY(hashed, page_id.fold(), PMEM_N_BUCKETS);

@@ -1759,6 +1759,7 @@ innobase_start_or_create_for_mysql(void)
 		"MB; srv_pmem_buf_size= " << srv_pmem_buf_size << "MB; " <<
 	    "; n_buckets=" << srv_pmem_buf_n_buckets <<
 	    "; bucket_size=" << srv_pmem_buf_bucket_size <<
+	    "; n_slots_per_seg=" << srv_aio_n_slots_per_seg <<
 	    "; used_free_ratio=" << srv_pmem_buf_used_free_ratio <<
 	    "; flush_pct=" << srv_pmem_buf_flush_pct <<
 		";\n";

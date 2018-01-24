@@ -3699,7 +3699,12 @@ innobase_init(
 	/* -------------- All log files ---------------------------*/
 
 	/* The default dir for log files is the datadir of MySQL */
-#if defined(UNIV_PMEMOBJ_BUF) || defined(UNIV_AIO_IMPROVE)
+#if defined(UNIV_AIO_IMPROVE)
+	if (!srv_aio_n_slots_per_seg) {
+		srv_aio_n_slots_per_seg = 256;
+	}
+#endif
+#if defined(UNIV_PMEMOBJ_BUF) 
 	if (!srv_pmem_buf_bucket_size) {
 		srv_pmem_buf_bucket_size = 256;
 	}
@@ -19474,7 +19479,13 @@ static MYSQL_SYSVAR_BOOL(locks_unsafe_for_binlog, innobase_locks_unsafe_for_binl
   " Force InnoDB to not use next-key locking, to use only row-level locking.",
   NULL, NULL, FALSE);
 
-#if defined(UNIV_PMEMOBJ_BUF) || defined(UNIV_AIO_IMPROVE)
+#if defined(UNIV_AIO_IMPROVE)
+static MYSQL_SYSVAR_ULONG(aio_n_slots_per_seg, srv_aio_n_slots_per_seg,
+  PLUGIN_VAR_RQCMDARG | PLUGIN_VAR_READONLY,
+  "Max number of slots per segment in AIO, from 1 to 65536, default is 256.",
+  NULL, NULL, 256, 1, 65536, 0);
+#endif 
+#if defined(UNIV_PMEMOBJ_BUF)
 static MYSQL_SYSVAR_ULONG(pmem_buf_bucket_size, srv_pmem_buf_bucket_size,
   PLUGIN_VAR_RQCMDARG | PLUGIN_VAR_READONLY,
   "Size of buckets (number of pages), from 1 to 65536, default is 256.",
@@ -20314,7 +20325,10 @@ static struct st_mysql_sys_var* innobase_system_variables[]= {
   MYSQL_SYSVAR(log_file_size),
   MYSQL_SYSVAR(log_files_in_group),
   MYSQL_SYSVAR(log_write_ahead_size),
-#if defined (UNIV_PMEMOBJ_BUF) || defined(UNIV_AIO_IMPROVE)
+#if defined(UNIV_AIO_IMPROVE)
+  MYSQL_SYSVAR(aio_n_slots_per_seg),
+#endif
+#if defined (UNIV_PMEMOBJ_BUF)
   MYSQL_SYSVAR(pmem_buf_bucket_size),
 #endif
 #if defined (UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_LOG) 

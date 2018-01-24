@@ -201,6 +201,9 @@ extern bool		trx_commit_disallowed;
 #endif /* UNIV_DEBUG */
 
 /*------------------------- LOG FILES ------------------------ */
+#if defined (UNIV_AIO_IMPROVE)
+ulong	srv_aio_n_slots_per_seg	= 256;
+#endif 
 #if defined(UNIV_PMEMOBJ_BUF) || defined (UNIV_AIO_IMPROVE)
 ulong	srv_pmem_buf_bucket_size	= 256;
 #endif 

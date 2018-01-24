@@ -6132,6 +6132,9 @@ pm_fil_io_batch(
 		params[n_params].m1 = node;
 		params[n_params].m2 = message;
 		++n_params;
+		
+		//Note that we don't call fil_node_complete_io() for sync write because
+		//we treat them as async write. In fil_aio_wait, all async write is called fil_node_complete_io()
 
 		//next block
 	} //end for
@@ -6272,6 +6275,13 @@ fil_flush(
 
 		return;
 	}
+#if defined (UNIV_NVM_LOG)
+	if (space->purpose == FIL_TYPE_LOG){
+		//we do not need to flush when the WAL file is in NVM
+		return;
+	}
+#endif //UNIV_NVM_LG
+
 //#endif /*UNIV_LOG_NVM */
 	if (fil_buffering_disabled(space)) {
 
@@ -6357,13 +6367,9 @@ retry:
 		node->n_pending_flushes++;
 
 		mutex_exit(&fil_system->mutex);
-#if defined (UNIV_NVM_LOG) 
-		if ( space->purpose == FIL_TYPE_LOG ){
-			//we skip_flush, do nothing
-		}
-#else //original
+
 		os_file_flush(file);
-#endif /* UNIV_NVM_LOG */
+
 		mutex_enter(&fil_system->mutex);
 
 		os_event_set(node->sync_event);
@@ -6422,6 +6428,8 @@ pm_buf_flush_spaces_in_list(
 	PMEM_BUF_BLOCK* pblock;
 
 	ulint		i;	
+	ulint		j;	
+	bool		is_existed;
 	fil_space_t*	space;
 	ulint*		space_ids;
 	ulint		n_space_ids;
@@ -6439,12 +6447,23 @@ pm_buf_flush_spaces_in_list(
 		ut_malloc_nokey(pflush_list->max_pages * sizeof(*space_ids)));
 
 	n_space_ids = 0;	
-
+	
 	for (i = 0; i < pflush_list->max_pages; i++) {
 		pblock = D_RW(D_RW(pflush_list->arr)[i]);
 
 		ulint space_id = pblock->id.space();
 		space =fil_space_get_by_id(space_id);
+
+		is_existed = false;
+		for (j = 0; j < n_space_ids; j++){
+			if (space_ids[j] == space_id){
+				is_existed = true;
+				break;
+			}
+		}	
+
+		if (is_existed)
+			continue;
 
 		if (space->purpose == FIL_TYPE_TABLESPACE &&
 		     !space->stop_new_ops &&
@@ -6452,20 +6471,6 @@ pm_buf_flush_spaces_in_list(
 
 			space_ids[n_space_ids++] = space_id;	
 		}
-		//space_ids[n_space_ids++] =D_RW(D_RW(pflush_list->arr)[i])->id.space();
-
-		//if (pblock->sync) {
-			fil_node_t* node = UT_LIST_GET_FIRST(space->chain);
-			/* The i/o operation is already completed when we return from
-os_aio: */
-		//	mutex_enter(&fil_system->mutex);
-
-			fil_node_complete_io(node, fil_system, req_type);
-
-		//	mutex_exit(&fil_system->mutex);
-
-			ut_ad(fil_validate_skip());
-		//}
 	}
 
 	mutex_exit(&fil_system->mutex);
