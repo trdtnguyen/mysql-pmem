@@ -496,7 +496,7 @@ retry:
 				pfree_block->sync = sync;
 				pmemobj_memcpy_persist(pop, pdata + pfree_block->pmemaddr, src_data, page_size); 
 #if defined (UNIV_PMEMOBJ_BUF_STAT)
-				buf->bucket_stats[hashed].n_overwrites++;
+				++buf->bucket_stats[hashed].n_overwrites;
 #endif 
 				pmemobj_rwlock_unlock(pop, &pfree_block->lock);
 				//pmemobj_rwlock_unlock(pop, &D_RW(D_RW(buf->buckets)[hashed])->lock);
@@ -545,7 +545,7 @@ retry:
 	pmemobj_rwlock_unlock(pop, &pfree_block->lock);
 
 #if defined (UNIV_PMEMOBJ_BUF_STAT)
-	buf->bucket_stats[hashed].n_writes++;
+	++buf->bucket_stats[hashed].n_writes;
 #endif 
 	//handle hash_list, 
 
@@ -572,7 +572,7 @@ retry:
 			}
 		}
 #if defined (UNIV_PMEMOBJ_BUF_STAT)
-		buf->bucket_stats[hashed].n_flushed_lists++;
+		++buf->bucket_stats[hashed].n_flushed_lists;
 #endif
 		//if(! buf->is_async_only) {
 		//	phashlist->n_aio_pending = phashlist->cur_pages;
@@ -1026,6 +1026,9 @@ pm_buf_read(PMEMobjpool* pop, PMEM_BUF* buf, const page_id_t page_id, const page
 #if defined (UNIV_PMEMOBJ_DEBUG)
 				assert( pm_check_io(pdata + pblock->pmemaddr, pblock->id) ) ;
 #endif
+#if defined(UNIV_PMEMOBJ_BUF_STAT)
+				++buf->bucket_stats[hashed].n_reads;
+#endif
 				pmemobj_rwlock_unlock(pop, &pblock->lock);
 
 				//return bytes_read;
@@ -1048,10 +1051,10 @@ pm_buf_read(PMEMobjpool* pop, PMEM_BUF* buf, const page_id_t page_id, const page
 
 #if defined (UNIV_PMEMOBJ_BUF_STAT)
 
-#define PMEM_BUF_BUCKET_STAT_PRINT(pbuf, index) do {\
+#define PMEM_BUF_BUCKET_STAT_PRINT(pb, index) do {\
 	assert (0 <= index && index <= PMEM_N_BUCKETS);\
-	PMEM_BUCKET_STAT* p = pbuf->bucket_stats[index];\
-	printf("bucket %d [n_writes %zu,\t n_overwrites %zu,\t n_reads %zu, \tmax_linked_lists %zu, \tn_flushed_lists %zu] \n ", p->n_writes, p->n_overwrite, p->n_reads, p->max_linked_lists, p->n_flushed_lists); \
+	PMEM_BUCKET_STAT* p = &pb->bucket_stats[index];\
+	printf("bucket %d [n_writes %zu,\t n_overwrites %zu,\t n_reads %zu, \tmax_linked_lists %zu, \tn_flushed_lists %zu] \n ",index,  p->n_writes, p->n_overwrites, p->n_reads, p->max_linked_lists, p->n_flushed_lists); \
 }while (0)
 
 
@@ -1069,6 +1072,14 @@ void pm_buf_bucket_stat_init(PMEM_BUF* pbuf) {
 	pbuf->bucket_stats = arr;
 }
 
+void pm_buf_stat_print_all(PMEM_BUF* pbuf) {
+	ulint i;
+	PMEM_BUCKET_STAT* arr = pbuf->bucket_stats;
+
+	for (i = 0; i < PMEM_N_BUCKETS; i++) {
+		PMEM_BUF_BUCKET_STAT_PRINT(pbuf, i);
+	}
+}
 
 #endif //UNIV_PMEMOBJ_STAT
 ///////////////////// DEBUG Funcitons /////////////////////////

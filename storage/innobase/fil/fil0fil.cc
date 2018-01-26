@@ -6252,21 +6252,6 @@ fil_flush(
 	mutex_enter(&fil_system->mutex);
 
 	fil_space_t*	space = fil_space_get_by_id(space_id);
-//#ifdef UNIV_NVM_LOG
-	//We skip thif flush in NVM_LOG
-//	if (space == NULL
-//	    || space->purpose == FIL_TYPE_LOG
-//	    || space->purpose == FIL_TYPE_TEMPORARY
-//	    || space->stop_new_ops
-//	    || space->is_being_truncated) {
-//		mutex_exit(&fil_system->mutex);
-//#ifdef UNIV_NVM_LOG_DEBUG
-//		if(space->purpose == FIL_TYPE_LOG)
-//			printf("PMEM_DEBUG: skip fil_flush space %lu\n", space_id);
-//#endif
-//		return;
-//	}
-//#else //original
 	if (space == NULL
 	    || space->purpose == FIL_TYPE_TEMPORARY
 	    || space->stop_new_ops
@@ -6275,14 +6260,7 @@ fil_flush(
 
 		return;
 	}
-#if defined (UNIV_NVM_LOG)
-	if (space->purpose == FIL_TYPE_LOG){
-		//we do not need to flush when the WAL file is in NVM
-		return;
-	}
-#endif //UNIV_NVM_LG
 
-//#endif /*UNIV_LOG_NVM */
 	if (fil_buffering_disabled(space)) {
 
 		/* No need to flush. User has explicitly disabled
@@ -6368,7 +6346,16 @@ retry:
 
 		mutex_exit(&fil_system->mutex);
 
+#if defined (UNIV_NVM_LOG)
+	if (space->purpose == FIL_TYPE_LOG){
+		//we do not need to flush when the WAL file is in NVM
+	}
+	else {
 		os_file_flush(file);
+	}
+#else
+		os_file_flush(file);
+#endif //UNIV_NVM_LG
 
 		mutex_enter(&fil_system->mutex);
 

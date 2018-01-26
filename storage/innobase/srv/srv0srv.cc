@@ -2154,10 +2154,14 @@ srv_master_do_active_tasks(void)
 		MONITOR_SRV_IBUF_MERGE_MICROSECOND, counter_time);
 
 	/* Flush logs if needed */
+#if defined (UNIV_PMEMOBJ_LOG)
+	//We don't need to flush log
+#else //original
 	srv_main_thread_op_info = "flushing log";
 	srv_sync_log_buffer_in_background();
 	MONITOR_INC_TIME_IN_MICRO_SECS(
 		MONITOR_SRV_LOG_FLUSH_MICROSECOND, counter_time);
+#endif //UNIV_PMEMOBJ_LOG
 
 	/* Now see if various tasks that are performed at defined
 	intervals need to be performed. */
@@ -2262,9 +2266,9 @@ srv_master_do_idle_tasks(void)
 	//See log_reserve_and_open()
 #else //original
 	srv_sync_log_buffer_in_background();
-#endif
 	MONITOR_INC_TIME_IN_MICRO_SECS(
 		MONITOR_SRV_LOG_FLUSH_MICROSECOND, counter_time);
+#endif
 
 	if (srv_shutdown_state > 0) {
 		return;

@@ -1758,7 +1758,6 @@ innobase_start_or_create_for_mysql(void)
 	ib::info() << "======== pool_size =" << srv_pmem_pool_size << 
 		"MB; srv_pmem_buf_size= " << srv_pmem_buf_size << "MB; " <<
 	    "; n_buckets=" << srv_pmem_buf_n_buckets <<
-	    "; bucket_size=" << srv_pmem_buf_bucket_size <<
 	    "; n_slots_per_seg=" << srv_aio_n_slots_per_seg <<
 	    "; used_free_ratio=" << srv_pmem_buf_used_free_ratio <<
 	    "; flush_pct=" << srv_pmem_buf_flush_pct <<
@@ -2831,6 +2830,10 @@ innobase_shutdown_for_mysql(void)
 	}
 
 #if defined (UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_DBW) || defined(UNIV_PMEMOBJ_BUF)
+#if defined (UNIV_PMEMOBJ_BUF_STAT)
+	//Print the statistic info
+	pm_buf_stat_print_all(gb_pmw->pbuf);	
+#endif
 	pm_wrapper_free(gb_pmw);
 #endif
 

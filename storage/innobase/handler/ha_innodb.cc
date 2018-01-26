@@ -4418,16 +4418,8 @@ innobase_commit(
 		innobase_commit_low(trx);
 
 		if (!read_only) {
-#if defined(UNIV_PMEMOBJ_LOG)
-			/*Set this flag to true make the trx_commit_complete_for_mysql() do nothing
-			//Since the log buffer now is in NVDIMM, we can safely skip writting
-			//and flushing log records when the transaction commit
-			//the background thread will do the work
-			*/
-			trx->flush_log_later = true;
-#else //original
 			trx->flush_log_later = false;
-#endif /*UNIV_PMEMOBJ_LOG */
+
 			if (innobase_commit_concurrency > 0) {
 
 				mysql_mutex_lock(&commit_cond_m);
@@ -4445,7 +4437,17 @@ innobase_commit(
 
 		/* Now do a write + flush of logs. */
 		if (!read_only) {
+#if defined(UNIV_PMEMOBJ_LOG)
+			/*Set this flag to true make the trx_commit_complete_for_mysql() do nothing
+			//Since the log buffer now is in NVDIMM, we can safely skip writting
+			//and flushing log records when the transaction commit
+			//the background thread will do the work
+			*/
+			trx->flush_log_later = true;
+			//Do nothing now
+#else //original
 			trx_commit_complete_for_mysql(trx);
+#endif /*UNIV_PMEMOBJ_LOG */
 		}
 
 	} else {

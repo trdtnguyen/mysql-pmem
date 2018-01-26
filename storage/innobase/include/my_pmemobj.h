@@ -330,6 +330,9 @@ PMEM_BUF* pm_pop_get_buf(PMEMobjpool* pop);
 #if defined(UNIV_PMEMOBJ_BUF_STAT)
 void
 	pm_buf_bucket_stat_init(PMEM_BUF* pbuf);
+
+void
+	pm_buf_stat_print_all(PMEM_BUF* pbuf);
 #endif
 //DEBUG functions
 
