@@ -3720,9 +3720,6 @@ innobase_init(
 	if (!srv_pmem_buf_size) {
 		srv_pmem_buf_size = 4 * 1024 ; //4 GB
 	}
-	if (!srv_pmem_buf_used_free_ratio) {
-		srv_pmem_buf_used_free_ratio = 0.5; 
-	}
 	if (!srv_pmem_buf_n_buckets) {
 		srv_pmem_buf_n_buckets = 128;
 	}
@@ -19506,10 +19503,6 @@ static MYSQL_SYSVAR_ULONG(pmem_buf_size, srv_pmem_buf_size,
   PLUGIN_VAR_RQCMDARG | PLUGIN_VAR_READONLY,
   "Path to PMEM BUFFER SIZE from 1MB to 16GB, default is 4GB.",
   NULL, NULL, 4*1024, 1, 16*1024,0);
-static MYSQL_SYSVAR_DOUBLE(pmem_buf_used_free_ratio, srv_pmem_buf_used_free_ratio,
-  PLUGIN_VAR_RQCMDARG | PLUGIN_VAR_READONLY,
-  "Ratio between the used list (in buckets) and the free lists in free_pool, from 0.1 to 10, default is 0.5",
-  NULL, NULL, 0.5, 0.1, 10,0);
 static MYSQL_SYSVAR_ULONG(pmem_buf_n_buckets, srv_pmem_buf_n_buckets,
   PLUGIN_VAR_RQCMDARG | PLUGIN_VAR_READONLY,
   "Number of buckets in the partition, from 1 to 1024, default is 128.",
@@ -20337,7 +20330,6 @@ static struct st_mysql_sys_var* innobase_system_variables[]= {
   MYSQL_SYSVAR(pmem_home_dir),
   MYSQL_SYSVAR(pmem_pool_size),
   MYSQL_SYSVAR(pmem_buf_size),
-  MYSQL_SYSVAR(pmem_buf_used_free_ratio),
   MYSQL_SYSVAR(pmem_buf_n_buckets),
   MYSQL_SYSVAR(pmem_buf_flush_pct),
 #endif

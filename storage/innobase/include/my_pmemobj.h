@@ -65,6 +65,9 @@ typedef struct __pmem_list_cleaner_slot PMEM_LIST_CLEANER_SLOT;
 struct __pmem_list_cleaner;
 typedef struct __pmem_list_cleaner PMEM_LIST_CLEANER;
 
+struct __pmem_flusher;
+typedef struct __pmem_flusher PMEM_FLUSHER;
+
 struct __pmem_buf_bucket_stat;
 typedef struct __pmem_buf_bucket_stat PMEM_BUCKET_STAT;
 #endif //UNIV_PMEMOBJ_BUF
@@ -227,6 +230,22 @@ struct __pmem_buf_free_pool {
 	size_t				max_lists;
 };
 
+/*The flusher thread
+ *if is waked by a signal (there is at least a list wait for flush): scan the waiting list and assign a worker to flush that list
+ if there is no list wait for flush, sleep and wait for a signal
+ * */
+struct __pmem_flusher {
+
+	PMEMrwlock		lock;
+
+	os_event_t			is_requested; //signaled when there is a new flushing list added
+
+	//the waiting_list
+	ulint size;
+	ulint tail; //always increase, circled counter
+	PMEM_BUF_BLOCK_LIST** flush_list_arr;
+};
+
 struct __pmem_buf {
 	size_t size;
 	size_t page_size;
@@ -251,6 +270,7 @@ struct __pmem_buf {
 	os_event_t*  flush_events; //N flush events for N buckets
 	os_event_t free_pool_event; //event for free_pool
 	PMEM_AIO_PARAM** params_arr;
+	
 };
 
 #if defined(UNIV_PMEMOBJ_BUF_STAT)
@@ -262,6 +282,7 @@ struct __pmem_buf_bucket_stat {
 	uint64_t		n_writes;
 	uint64_t		n_overwrites;
 	uint64_t		n_reads;	
+	uint64_t		n_reads_flushing;	
 	uint64_t		max_linked_lists;
 	uint64_t		n_flushed_lists;
 };
@@ -274,8 +295,7 @@ void
 pm_wrapper_buf_alloc_or_open(
 		 PMEM_WRAPPER*		pmw,
 		 const size_t		buf_size,
-		 const size_t		page_size,
-		 const double		ratio);
+		 const size_t		page_size);
 
 void pm_wrapper_buf_close(PMEM_WRAPPER* pmw);
 
@@ -283,8 +303,7 @@ int
 pm_wrapper_buf_alloc(
 		PMEM_WRAPPER*		pmw,
 	    const size_t		size,
-		const size_t		page_size,
-		const double		ratio);
+		const size_t		page_size);
 
 PMEM_BUF* pm_pop_get_buf(PMEMobjpool* pop);
 
@@ -292,8 +311,7 @@ PMEM_BUF*
 pm_pop_buf_alloc(
 		 PMEMobjpool*		pop,
 		 const size_t		size,
-		 const size_t		page_size,
-		 const double		ratio);
+		 const size_t		page_size);
 
 int 
 pm_buf_block_init(PMEMobjpool *pop, void *ptr, void *arg);
@@ -303,12 +321,14 @@ pm_buf_list_init(
 		PMEMobjpool*	pop,
 		PMEM_BUF*		buf, 
 		const size_t	total_size,
-		const size_t	page_size,
-		const double	ratio);
+		const size_t	page_size);
 
 int
 //pm_buf_write(PMEMobjpool* pop, PMEM_BUF* buf, buf_page_t* bpage, void* data, bool sync);
 pm_buf_write(PMEMobjpool* pop, PMEM_BUF* buf, page_id_t page_id, page_size_t size, byte* src_data, bool sync);
+
+int
+pm_buf_write_no_free_pool(PMEMobjpool* pop, PMEM_BUF* buf, page_id_t page_id, page_size_t size, byte* src_data, bool sync);
 
 const PMEM_BUF_BLOCK*
 pm_buf_read(PMEMobjpool* pop, PMEM_BUF* buf, const page_id_t page_id, const page_size_t size, byte* data, bool sync);
@@ -365,6 +385,7 @@ struct __pmem_list_cleaner_slot {
 	TOID(PMEM_BUF_BLOCK_LIST)		flush_list;
 };
 
+
 struct __pmem_list_cleaner {
 	ib_mutex_t			mutex;
 	os_event_t			is_requested;
@@ -418,6 +439,9 @@ pm_lc_flush_slot(void);
 //version 1: implemented in pmem0buf, directly handle without using thread slot
 void
 pm_handle_finished_block(PMEMobjpool* pop, PMEM_BUF* buf, PMEM_BUF_BLOCK* pblock);
+
+void
+pm_handle_finished_block_no_free_pool(PMEMobjpool* pop, PMEM_BUF* buf, PMEM_BUF_BLOCK* pblock);
 
 //version 2 is implemented in buf0flu.cc that handle threads slot
 void

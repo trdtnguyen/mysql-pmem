@@ -1755,11 +1755,13 @@ innobase_start_or_create_for_mysql(void)
 	#ifdef UNIV_PMEMOBJ_BUF
 		ib::info() << "======= Hello PMEMOBJ Buffer from VLDB lab ========\n";
 	#endif
+	#ifdef UNIV_PMEMOBJ_BUF_V2
+		ib::info() << "======= Hello PMEMOBJ Buffer (Ver. 2 No free pool) from VLDB lab ========\n";
+	#endif 
 	ib::info() << "======== pool_size =" << srv_pmem_pool_size << 
 		"MB; srv_pmem_buf_size= " << srv_pmem_buf_size << "MB; " <<
 	    "; n_buckets=" << srv_pmem_buf_n_buckets <<
 	    "; n_slots_per_seg=" << srv_aio_n_slots_per_seg <<
-	    "; used_free_ratio=" << srv_pmem_buf_used_free_ratio <<
 	    "; flush_pct=" << srv_pmem_buf_flush_pct <<
 		";\n";
 
@@ -1916,8 +1918,7 @@ innobase_start_or_create_for_mysql(void)
 	size_t buf_size = srv_pmem_buf_size * 1024 * 1024;
 	pm_wrapper_buf_alloc_or_open(gb_pmw,
 							     buf_size,
-								 UNIV_PAGE_SIZE, 
-								 srv_pmem_buf_used_free_ratio);
+								 UNIV_PAGE_SIZE);
 	
 	//[TODO] Recovery handler
 #endif /* UNIV_PMEMOBJ_BUF */

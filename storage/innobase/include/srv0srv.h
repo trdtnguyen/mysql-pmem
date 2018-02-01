@@ -279,7 +279,6 @@ extern ulong	srv_pmem_buf_bucket_size;
 extern char*	srv_pmem_home_dir;
 extern ulong	srv_pmem_pool_size;
 extern ulong	srv_pmem_buf_size;
-extern double	srv_pmem_buf_used_free_ratio;
 extern ulong	srv_pmem_buf_n_buckets;
 extern double	srv_pmem_buf_flush_pct;
 #endif 

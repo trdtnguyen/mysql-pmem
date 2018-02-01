@@ -5957,8 +5957,9 @@ pm_fil_io_batch(
 	assert(plist);
 
 	pdata = pmem_buf->p_align;
+#if defined (UNIV_PMEMOBJ_BUF_DEBUG)
 	plist->n_flush = 0;
-	
+#endif 	
 	assert(plist->hashed_id != PMEM_ID_NONE);
 
 	params = pmem_buf->params_arr[plist->hashed_id];
@@ -5980,16 +5981,17 @@ pm_fil_io_batch(
 			continue;
 		}
 		assert( pblock->pmemaddr < pmem_buf->size);
-		UNIV_MEM_ASSERT_RW(pdata + pblock->pmemaddr, page_size);
+		//UNIV_MEM_ASSERT_RW(pdata + pblock->pmemaddr, page_size);
 #if defined(UNIV_PMEMOBJ_BUF_DEBUG)
 		//	printf("PMEM_DEBUG: aio request page_id %zu space %zu pmemaddr %zu flush_list id=%zu\n", pblock->id.page_no(), pblock->id.space(), pblock->pmemaddr, plist->list_id);
 #endif
 		assert(pblock->state == PMEM_IN_USED_BLOCK);	
 		pblock->state = PMEM_IN_FLUSH_BLOCK;	
 
+#if defined (UNIV_PMEMOBJ_BUF_DEBUG)
 		//count++;
 		++plist->n_flush;
-
+#endif
 		//dberr_t err = pm_fil_io_batch(
 		//		request, plist);
 
@@ -6139,12 +6141,13 @@ pm_fil_io_batch(
 		//next block
 	} //end for
 
+#if defined (UNIV_PMEMOBJ_BUF_DEBUG)
 	if (plist->n_flush != plist->cur_pages ||
 			plist->n_aio_pending + plist->n_sio_pending != plist->cur_pages) {
 		printf("error: list_id %zu n_flush =%zu, n_aio_pending = %zu, n_sio_pending = %zu cur_pages=%zu\n", plist->list_id, plist->n_flush, plist->n_aio_pending, plist->n_sio_pending, plist->cur_pages);
 		assert(0);
 	}
-
+#endif 
 	//Now submit in batch
 	dberr_t	err;
 	/* Queue the aio request */
@@ -6216,7 +6219,11 @@ fil_aio_wait(
 			PMEM_BUF_BLOCK* pblock = static_cast<PMEM_BUF_BLOCK*> (message);
 			if (pblock != NULL && pblock->check == PMEM_AIO_CHECK) {
 				//pm_handle_finished_block(pblock);
+		#if defined (UNIV_PMEMOBJ_BUF_V2)
+				pm_handle_finished_block_no_free_pool(gb_pmw->pop, gb_pmw->pbuf,  pblock);
+		#else
 				pm_handle_finished_block(gb_pmw->pop, gb_pmw->pbuf,  pblock);
+		#endif
 			} //end if pmem aio
 			else {
 		//		printf("PMEM_DEBUG: pblock is not NULL but not from PMEM???\n");

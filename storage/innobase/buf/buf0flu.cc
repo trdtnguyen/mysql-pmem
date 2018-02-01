@@ -1085,11 +1085,15 @@ buf_flush_write_block_low(
 	// EXCEPT: space 0
 	//if (bpage->id.page_no() != 0) {
 	//if(0) {
-	
+
+#if defined (UNIV_PMEMOBJ_BUF_V2)	
+	int ret = pm_buf_write_no_free_pool(gb_pmw->pop, gb_pmw->pbuf, bpage->id, bpage->size, frame, sync);
+#else
 	int ret = pm_buf_write(gb_pmw->pop, gb_pmw->pbuf, bpage->id, bpage->size, frame, sync);
+#endif
 	assert(ret == PMEM_SUCCESS);
 	//we remove this page from LRU
-	//assert(buf_page_io_complete(bpage,true));
+	//assert(buf_page_io_complete(bpage, true));
 	assert(buf_page_io_complete(bpage,sync));
 	goto skip_write_and_fsync;
 
