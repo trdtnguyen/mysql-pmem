@@ -402,6 +402,7 @@ static PSI_mutex_info all_innodb_mutexes[] = {
 	PSI_KEY(page_cleaner_mutex),
 #if defined (UNIV_PMEMOBJ_BUF)
 	PSI_KEY(pm_list_cleaner_mutex),
+	PSI_KEY(pm_flusher_mutex),
 #endif
 	PSI_KEY(page_zip_stat_per_index_mutex),
 	PSI_KEY(purge_sys_pq_mutex),
@@ -488,6 +489,7 @@ static PSI_thread_info	all_innodb_threads[] = {
 	PSI_KEY(page_cleaner_thread),
 #if defined (UNIV_PMEMOBJ_BUF)
 	PSI_KEY(pm_list_cleaner_thread),
+	PSI_KEY(pm_flusher_thread),
 #endif
 	PSI_KEY(recv_writer_thread),
 	PSI_KEY(srv_error_monitor_thread),
@@ -3708,6 +3710,12 @@ innobase_init(
 	if (!srv_pmem_buf_bucket_size) {
 		srv_pmem_buf_bucket_size = 256;
 	}
+#endif 
+#if defined (UNIV_PMEMOBJ_BUF_FLUSHER)
+	if (!srv_pmem_n_flush_threads) {
+		srv_pmem_n_flush_threads = 8;
+	}
+
 #endif 
 
 #if defined(UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_LOG)
@@ -19490,6 +19498,13 @@ static MYSQL_SYSVAR_ULONG(pmem_buf_bucket_size, srv_pmem_buf_bucket_size,
   "Size of buckets (number of pages), from 1 to 65536, default is 256.",
   NULL, NULL, 256, 1, 65536, 0);
 #endif 
+#if defined(UNIV_PMEMOBJ_BUF_FLUSHER)
+static MYSQL_SYSVAR_ULONG(pmem_n_flush_threads, srv_pmem_n_flush_threads,
+  PLUGIN_VAR_RQCMDARG | PLUGIN_VAR_READONLY,
+  "Number of threads in flusher, from 1 to 64, default is 8.",
+  NULL, NULL, 8, 1, 64, 0);
+
+#endif
 
 #if defined (UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_LOG) 
 static MYSQL_SYSVAR_STR(pmem_home_dir, srv_pmem_home_dir,
@@ -20326,6 +20341,9 @@ static struct st_mysql_sys_var* innobase_system_variables[]= {
 #if defined (UNIV_PMEMOBJ_BUF)
   MYSQL_SYSVAR(pmem_buf_bucket_size),
 #endif
+#if defined (UNIV_PMEMOBJ_BUF_FLUSHER)
+  MYSQL_SYSVAR(pmem_n_flush_threads),
+#endif 
 #if defined (UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_LOG) 
   MYSQL_SYSVAR(pmem_home_dir),
   MYSQL_SYSVAR(pmem_pool_size),

@@ -6221,7 +6221,9 @@ fil_aio_wait(
 				//pm_handle_finished_block(pblock);
 		#if defined (UNIV_PMEMOBJ_BUF_V2)
 				pm_handle_finished_block_no_free_pool(gb_pmw->pop, gb_pmw->pbuf,  pblock);
-		#else
+		#elif defined (UNIV_PMEMOBJ_BUF_FLUSHER)
+				pm_handle_finished_block_with_flusher(gb_pmw->pop, gb_pmw->pbuf,  pblock);
+		#else //the stable version
 				pm_handle_finished_block(gb_pmw->pop, gb_pmw->pbuf,  pblock);
 		#endif
 			} //end if pmem aio

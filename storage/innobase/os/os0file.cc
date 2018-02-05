@@ -7310,6 +7310,11 @@ AIO::pm_process_batch(
 	assert(srv_use_native_aio);
 	assert(!request.is_encrypted() && !request.is_compressed());
 	
+	/*
+	 * if n_params < slots_per_seg: just need 1 seg to handle (waste, because write thread can handle more params)
+	 * if n_params == slots_per_seg: just need 1 seg to handle (OK)
+	 * if n_params > slots_per_seg: need more segs to handle one batch_aio
+	 * */	
 	n_seg_need = (n_params + slots_per_seg - 1) / slots_per_seg;
 
 	//Wait in case current array is full
@@ -7324,7 +7329,7 @@ AIO::pm_process_batch(
 			break;
 		}
 
-		printf("PMEM_INFO all segs are full, %zu/%zu, wait for a aio seg free...\n", m_n_seg_reserved, m_n_segments);
+		//printf("PMEM_INFO all segs are full, %zu/%zu, wait for a aio seg free...\n", m_n_seg_reserved, m_n_segments);
 
 		release();
 		//os_event_wait(m_not_full);

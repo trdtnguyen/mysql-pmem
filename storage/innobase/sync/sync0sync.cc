@@ -69,6 +69,7 @@ mysql_pfs_key_t	recalc_pool_mutex_key;
 mysql_pfs_key_t	page_cleaner_mutex_key;
 #if defined (UNIV_PMEMOBJ_BUF)
 mysql_pfs_key_t	pm_list_cleaner_mutex_key;
+mysql_pfs_key_t	pm_flusher_mutex_key;
 #endif
 mysql_pfs_key_t	purge_sys_pq_mutex_key;
 mysql_pfs_key_t	recv_sys_mutex_key;

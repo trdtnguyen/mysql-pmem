@@ -1755,12 +1755,18 @@ innobase_start_or_create_for_mysql(void)
 	#ifdef UNIV_PMEMOBJ_BUF
 		ib::info() << "======= Hello PMEMOBJ Buffer from VLDB lab ========\n";
 	#endif
+	#ifdef UNIV_PMEMOBJ_BUF_FLUSHER
+		ib::info() << "======= Hello PMEMOBJ Buffer with FLUSHER from VLDB lab ========\n";
+	#endif
 	#ifdef UNIV_PMEMOBJ_BUF_V2
 		ib::info() << "======= Hello PMEMOBJ Buffer (Ver. 2 No free pool) from VLDB lab ========\n";
 	#endif 
 	ib::info() << "======== pool_size =" << srv_pmem_pool_size << 
 		"MB; srv_pmem_buf_size= " << srv_pmem_buf_size << "MB; " <<
 	    "; n_buckets=" << srv_pmem_buf_n_buckets <<
+	#ifdef UNIV_PMEMOBJ_BUF_FLUSHER
+	    "; n_flush_threads=" << srv_pmem_n_flush_threads <<
+	#endif
 	    "; n_slots_per_seg=" << srv_aio_n_slots_per_seg <<
 	    "; flush_pct=" << srv_pmem_buf_flush_pct <<
 		";\n";
@@ -1957,13 +1963,15 @@ innobase_start_or_create_for_mysql(void)
 	//Declare the coordinator and worker flush threads for PMEM
 	//pm_list_cleaner_init();
 
-	os_thread_create(pm_buf_flush_list_cleaner_coordinator,
-			 NULL, NULL);
+	os_thread_create(pm_buf_flush_list_cleaner_coordinator, NULL, NULL);
+#if defined (UNIV_PMEMOBJ_BUF_FLUSHER)
+	//os_thread_create(pm_flusher_coordinator, NULL, NULL);
 	//printf("PMEM_INFO: ========>   create %d worker threads for pm\n", PMEM_N_BUCKETS);
-	//for (i = 1; i < PMEM_N_BUCKETS; ++i) {
-	//	os_thread_create(pm_buf_flush_list_cleaner_worker,
-	//			 NULL, NULL);
-	//}
+	for (i = 1; i < srv_n_page_cleaners; ++i) {
+		os_thread_create(pm_flusher_worker, NULL, NULL);
+	}
+#endif 
+
 #endif //UNIV_PMEMOBJ_BUF
 
 	srv_start_state_set(SRV_START_STATE_IO);

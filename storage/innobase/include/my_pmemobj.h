@@ -221,6 +221,9 @@ struct __pmem_buf_block_list_t {
 	int					check;
 	ulint				last_time;
 	
+	int					flush_worker_id;
+	bool				is_worker_handling;
+	
 };
 
 struct __pmem_buf_free_pool {
@@ -230,21 +233,6 @@ struct __pmem_buf_free_pool {
 	size_t				max_lists;
 };
 
-/*The flusher thread
- *if is waked by a signal (there is at least a list wait for flush): scan the waiting list and assign a worker to flush that list
- if there is no list wait for flush, sleep and wait for a signal
- * */
-struct __pmem_flusher {
-
-	PMEMrwlock		lock;
-
-	os_event_t			is_requested; //signaled when there is a new flushing list added
-
-	//the waiting_list
-	ulint size;
-	ulint tail; //always increase, circled counter
-	PMEM_BUF_BLOCK_LIST** flush_list_arr;
-};
 
 struct __pmem_buf {
 	size_t size;
@@ -271,6 +259,7 @@ struct __pmem_buf {
 	os_event_t free_pool_event; //event for free_pool
 	PMEM_AIO_PARAM** params_arr;
 	
+	PMEM_FLUSHER* flusher;	
 };
 
 #if defined(UNIV_PMEMOBJ_BUF_STAT)
@@ -330,6 +319,9 @@ pm_buf_write(PMEMobjpool* pop, PMEM_BUF* buf, page_id_t page_id, page_size_t siz
 int
 pm_buf_write_no_free_pool(PMEMobjpool* pop, PMEM_BUF* buf, page_id_t page_id, page_size_t size, byte* src_data, bool sync);
 
+int
+pm_buf_write_with_flusher(PMEMobjpool* pop, PMEM_BUF* buf, page_id_t page_id, page_size_t size, byte* src_data, bool sync);
+
 const PMEM_BUF_BLOCK*
 pm_buf_read(PMEMobjpool* pop, PMEM_BUF* buf, const page_id_t page_id, const page_size_t size, byte* data, bool sync);
 
@@ -346,6 +338,43 @@ pm_buf_write_aio_complete(PMEMobjpool* pop, PMEM_BUF* buf, TOID(PMEM_BUF_BLOCK)*
 //pm_buf_write_aio_complete(PMEMobjpool* pop, PMEM_BUF* buf, PMEMoid* poid);
 
 PMEM_BUF* pm_pop_get_buf(PMEMobjpool* pop);
+
+//Flusher
+
+/*The flusher thread
+ *if is waked by a signal (there is at least a list wait for flush): scan the waiting list and assign a worker to flush that list
+ if there is no list wait for flush, sleep and wait for a signal
+ * */
+struct __pmem_flusher {
+
+	ib_mutex_t			mutex;
+	//for worker
+	os_event_t			is_req_not_empty; //signaled when there is a new flushing list added
+	os_event_t			is_req_full;
+
+	os_event_t			is_flush_full;
+
+	os_event_t			is_all_finished; //signaled when all workers are finished flushing and no pending request 
+	os_event_t			is_all_closed; //signaled when all workers are closed 
+	volatile ulint n_workers;
+
+	//the waiting_list
+	ulint size;
+	ulint tail; //always increase, circled counter, mark where the next flush list will be assigned
+	ulint n_requested;
+	ulint n_flushing;
+
+	bool is_running;
+
+	//PMEM_BUF_BLOCK_LIST* flush_list_arr;
+	PMEM_BUF_BLOCK_LIST** flush_list_arr;
+};
+void
+pm_flusher_init(
+				PMEM_BUF*		buf, 
+				const size_t	size);
+void
+pm_buf_flusher_close(PMEM_BUF*	buf);
 
 #if defined(UNIV_PMEMOBJ_BUF_STAT)
 void
@@ -443,6 +472,10 @@ pm_handle_finished_block(PMEMobjpool* pop, PMEM_BUF* buf, PMEM_BUF_BLOCK* pblock
 void
 pm_handle_finished_block_no_free_pool(PMEMobjpool* pop, PMEM_BUF* buf, PMEM_BUF_BLOCK* pblock);
 
+//Implemented in buf0flu.cc using with pm_buf_write_with_flsuher
+void
+pm_handle_finished_block_with_flusher(PMEMobjpool* pop, PMEM_BUF* buf, PMEM_BUF_BLOCK* pblock);
+
 //version 2 is implemented in buf0flu.cc that handle threads slot
 void
 pm_handle_finished_block_v2(PMEM_BUF_BLOCK* pblock);
@@ -466,6 +499,15 @@ os_thread_ret_t
 DECLARE_THREAD(pm_buf_flush_list_cleaner_worker)(
 		void* arg);
 
+extern "C"
+os_thread_ret_t
+DECLARE_THREAD(pm_flusher_coordinator)(
+		void* arg);
+
+extern "C"
+os_thread_ret_t
+DECLARE_THREAD(pm_flusher_worker)(
+		void* arg);
 #ifdef UNIV_DEBUG
 
 void

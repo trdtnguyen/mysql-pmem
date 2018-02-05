@@ -274,6 +274,9 @@ extern ulong	srv_aio_n_slots_per_seg;
 #if defined(UNIV_PMEMOBJ_BUF)
 extern ulong	srv_pmem_buf_bucket_size;
 #endif
+#if defined(UNIV_PMEMOBJ_BUF_FLUSHER)
+extern ulong	srv_pmem_n_flush_threads;
+#endif
 
 #if defined(UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_LOG) 
 extern char*	srv_pmem_home_dir;
@@ -490,6 +493,7 @@ extern mysql_pfs_key_t	io_write_thread_key;
 extern mysql_pfs_key_t	page_cleaner_thread_key;
 #if defined (UNIV_PMEMOBJ_BUF)
 extern mysql_pfs_key_t	pm_list_cleaner_thread_key;
+extern mysql_pfs_key_t	pm_flusher_thread_key;
 #endif
 extern mysql_pfs_key_t	recv_writer_thread_key;
 extern mysql_pfs_key_t	srv_error_monitor_thread_key;
