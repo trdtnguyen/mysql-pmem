@@ -2157,7 +2157,7 @@ srv_master_do_active_tasks(void)
 
 	/* Flush logs if needed */
 #if defined (UNIV_PMEMOBJ_LOG)
-	//We don't need to flush log
+	//We don't need to write + flush log every second
 #else //original
 	srv_main_thread_op_info = "flushing log";
 	srv_sync_log_buffer_in_background();

@@ -19512,16 +19512,16 @@ static MYSQL_SYSVAR_STR(pmem_home_dir, srv_pmem_home_dir,
   "Path to PMEM home dir.", NULL, NULL, NULL);
 static MYSQL_SYSVAR_ULONG(pmem_pool_size, srv_pmem_pool_size,
   PLUGIN_VAR_RQCMDARG | PLUGIN_VAR_READONLY,
-  "Path to PMEMobjpool size, from 1GB to 16GB, default 8GB.",
+  "PMEMobjpool size, from 1GB to 16GB, default 8GB.",
   NULL, NULL, 8*1024, 1024, 16*1024,0);
 static MYSQL_SYSVAR_ULONG(pmem_buf_size, srv_pmem_buf_size,
   PLUGIN_VAR_RQCMDARG | PLUGIN_VAR_READONLY,
-  "Path to PMEM BUFFER SIZE from 1MB to 16GB, default is 4GB.",
+  "PMEM BUFFER SIZE from 1MB to 16GB, default is 4GB.",
   NULL, NULL, 4*1024, 1, 16*1024,0);
 static MYSQL_SYSVAR_ULONG(pmem_buf_n_buckets, srv_pmem_buf_n_buckets,
   PLUGIN_VAR_RQCMDARG | PLUGIN_VAR_READONLY,
-  "Number of buckets in the partition, from 1 to 1024, default is 128.",
-  NULL, NULL, 128, 1, 1024,0);
+  "Number of buckets in the partition, from 1 to 1024*1024, default is 128.",
+  NULL, NULL, 128, 1, 1024*1024,0);
 static MYSQL_SYSVAR_DOUBLE(pmem_buf_flush_pct, srv_pmem_buf_flush_pct,
   PLUGIN_VAR_RQCMDARG | PLUGIN_VAR_READONLY,
   "Threshold to flush a sub-list, from 0.1 to 1, default is 0.9",

@@ -5815,34 +5815,6 @@ fil_io(
 	req_type.block_size(node->block_size);
 
 	dberr_t	err;
-#if defined (UNIV_PMEMOBJ_BUF)
-	//if (!req_type.is_log()) {
-	//	if (req_type.is_read()) {
-	//		size_t read_bytes=  pm_buf_read(gb_pmw->pop, gb_pmw->pbuf,
-	//				page_id, page_size, buf);
-
-	//		if (read_bytes > 0) {
-	//			err = DB_SUCCESS;
-	//			if (!sync) {
-	//				//this call is necessary to notify the buffer pool the read ID complete
-	//				buf_page_io_complete(static_cast<buf_page_t*>(message));
-	//			}
-	//			goto skip_io;
-	//		}
-	//	}
-		//else if (req_type.is_write()) {
-		//	if(!sync) {
-		//		int ret = pm_buf_write(gb_pmw->pop, gb_pmw->pbuf,
-		//			   	page_id, page_size,buf, sync);
-		//		assert(ret == PMEM_SUCCESS);
-		//		//After memcpy, We need this call to sync the buffer pool variables	
-		//		if (!sync)
-		//			buf_page_io_complete(static_cast<buf_page_t*>(message));
-		//		goto skip_io;
-		//	}
-		//}
-	//}
-#endif //UNIV_PMEMOBJ_BUF
 
 #ifdef UNIV_HOTBACKUP
 	/* In mysqlbackup do normal i/o, not aio */
@@ -5882,12 +5854,6 @@ fil_io(
 			// log_io_complete() is called in the upper layer
 		}
 #endif /*UNIV_NVM_LOG */
-
-#if defined (UNIV_PMEMOBJ_DBW) 
-		if (space == TRX_SYS_SPACE) {
-
-		}
-#endif /* UNIV_PMEMOBJ_DBW */
 
 	if (err == DB_IO_NO_PUNCH_HOLE) {
 
@@ -6443,13 +6409,16 @@ pm_buf_flush_spaces_in_list(
 		ut_malloc_nokey(pflush_list->max_pages * sizeof(*space_ids)));
 
 	n_space_ids = 0;	
-	
+/*[TODO] This approach is O(n^2) expensive	
+ * If pages in the list is sorted by space_ids than the cost is only O(n)
+ * */
 	for (i = 0; i < pflush_list->max_pages; i++) {
 		pblock = D_RW(D_RW(pflush_list->arr)[i]);
 
 		ulint space_id = pblock->id.space();
 		space =fil_space_get_by_id(space_id);
-
+		
+		//scan for existed space_ids in the list
 		is_existed = false;
 		for (j = 0; j < n_space_ids; j++){
 			if (space_ids[j] == space_id){

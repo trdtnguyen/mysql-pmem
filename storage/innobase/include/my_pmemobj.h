@@ -104,8 +104,13 @@ struct __pmem_wrapper {
 
 /* FUNCTIONS*/
 
-PMEM_WRAPPER* pm_wrapper_create(const char* path, const size_t pool_size);
-void pm_wrapper_free(PMEM_WRAPPER* pmw);
+PMEM_WRAPPER*
+pm_wrapper_create(
+		const char*		path,
+	   	const size_t	pool_size);
+
+void
+pm_wrapper_free(PMEM_WRAPPER* pmw);
 
 
 PMEMoid pm_pop_alloc_bytes(PMEMobjpool* pop, size_t size);
@@ -127,11 +132,24 @@ struct __pmem_log_buf {
 };
 
 void* pm_wrapper_logbuf_get_logdata(PMEM_WRAPPER* pmw);
-int pm_wrapper_logbuf_alloc(PMEM_WRAPPER* pmw, const size_t size);
-int pm_wrapper_logbuf_realloc(PMEM_WRAPPER* pmw, const size_t size);
+int
+pm_wrapper_logbuf_alloc(
+		PMEM_WRAPPER*		pmw,
+	   	const size_t		size);
+
+int
+pm_wrapper_logbuf_realloc(
+		PMEM_WRAPPER*		pmw,
+	   	const size_t		size);
 PMEM_LOG_BUF* pm_pop_get_logbuf(PMEMobjpool* pop);
-PMEM_LOG_BUF* pm_pop_logbuf_alloc(PMEMobjpool* pop, const size_t size);
-PMEM_LOG_BUF* pm_pop_logbuf_realloc(PMEMobjpool* pop, const size_t size);
+PMEM_LOG_BUF*
+pm_pop_logbuf_alloc(
+		PMEMobjpool*		pop,
+	   	const size_t		size);
+PMEM_LOG_BUF* 
+pm_pop_logbuf_realloc(
+		PMEMobjpool*		pop,
+	   	const size_t		size);
 ssize_t  pm_wrapper_logbuf_io(PMEM_WRAPPER* pmw, 
 							const int type,
 							void* buf, 
@@ -139,7 +157,6 @@ ssize_t  pm_wrapper_logbuf_io(PMEM_WRAPPER* pmw,
 							unsigned long int n);
 
 ///////////// DOUBLE WRITE BUFFER //////////////////////////
-
 
 struct __pmem_dbw {
 	size_t size;
@@ -149,16 +166,24 @@ struct __pmem_dbw {
 	uint64_t b_first_free;
 	bool is_new;
 };
+
 void* pm_wrapper_dbw_get_dbwdata(PMEM_WRAPPER* pmw);
-int pm_wrapper_dbw_alloc(PMEM_WRAPPER* pmw, const size_t size);
+
+int 
+pm_wrapper_dbw_alloc(
+		PMEM_WRAPPER*		pmw,
+	   	const size_t		size);
+
 PMEM_DBW* pm_pop_get_dbw(PMEMobjpool* pop);
-PMEM_DBW* pm_pop_dbw_alloc(PMEMobjpool* pop, const size_t size);
+PMEM_DBW*
+pm_pop_dbw_alloc(
+		PMEMobjpool*		pop,
+	   	const size_t		size);
 ssize_t  pm_wrapper_dbw_io(PMEM_WRAPPER* pmw, 
 							const int type,
 							void* buf, 
 							const uint64_t offset,
 							unsigned long int n);
-
 
 /////// PMEM BUF  //////////////////////
 #if defined (UNIV_PMEMOBJ_BUF)
@@ -182,18 +207,12 @@ struct list_constr_args{
  * */
 struct __pmem_buf_block_t{
 	PMEMrwlock					lock;
-	//POBJ_LIST_ENTRY(PMEM_BUF_BLOCK) entries;
-//	uint64_t		id;
 	page_id_t					id;
-//	size_t			size;
 	page_size_t					size;
 	int							check;
-	//buf_page_t*		bpage;
 	bool	sync;
 	PMEM_BLOCK_STATE			state;
 	TOID(PMEM_BUF_BLOCK_LIST)	list;
-	//reference to the flush thread (slot)
-	PMEM_LIST_CLEANER_SLOT*	pslot;
 	uint64_t		pmemaddr; /*
 						  the offset of the page in pmem
 						  note that the size of page can be got from page
@@ -221,8 +240,8 @@ struct __pmem_buf_block_list_t {
 	int					check;
 	ulint				last_time;
 	
-	int					flush_worker_id;
-	bool				is_worker_handling;
+	//int					flush_worker_id;
+	//bool				is_worker_handling;
 	
 };
 
@@ -313,29 +332,53 @@ pm_buf_list_init(
 		const size_t	page_size);
 
 int
-//pm_buf_write(PMEMobjpool* pop, PMEM_BUF* buf, buf_page_t* bpage, void* data, bool sync);
-pm_buf_write(PMEMobjpool* pop, PMEM_BUF* buf, page_id_t page_id, page_size_t size, byte* src_data, bool sync);
+pm_buf_write(
+			PMEMobjpool*	pop,
+		   	PMEM_BUF*		buf,
+		   	page_id_t		page_id,
+		   	page_size_t		size,
+		   	byte*			src_data,
+		   	bool			sync);
 
 int
-pm_buf_write_no_free_pool(PMEMobjpool* pop, PMEM_BUF* buf, page_id_t page_id, page_size_t size, byte* src_data, bool sync);
+pm_buf_write_no_free_pool(
+			PMEMobjpool*	pop,
+		   	PMEM_BUF*		buf,
+		   	page_id_t		page_id,
+		   	page_size_t		size,
+		   	byte*			src_data, 
+			bool			sync);
 
 int
-pm_buf_write_with_flusher(PMEMobjpool* pop, PMEM_BUF* buf, page_id_t page_id, page_size_t size, byte* src_data, bool sync);
+pm_buf_write_with_flusher(
+			PMEMobjpool*	pop,
+		   	PMEM_BUF*		buf,
+		   	page_id_t		page_id,
+		   	page_size_t		size,
+		   	byte*			src_data,
+		   	bool			sync);
 
 const PMEM_BUF_BLOCK*
-pm_buf_read(PMEMobjpool* pop, PMEM_BUF* buf, const page_id_t page_id, const page_size_t size, byte* data, bool sync);
+pm_buf_read(
+			PMEMobjpool*		pop,
+		   	PMEM_BUF*			buf,
+		   	const page_id_t		page_id,
+		   	const page_size_t	size,
+		   	byte*				data,
+		   	bool sync);
 
 void
-pm_buf_flush_list(PMEMobjpool* pop, PMEM_BUF* buf, PMEM_BUF_BLOCK_LIST* plist);
+pm_buf_flush_list(
+			PMEMobjpool*			pop,
+		   	PMEM_BUF*				buf,
+		   	PMEM_BUF_BLOCK_LIST*	plist);
+
 
 void
-pm_buf_flush_list_v2(PMEMobjpool* pop, PMEM_BUF* buf, PMEM_LIST_CLEANER_SLOT* slot);
-
-
-void
-pm_buf_write_aio_complete(PMEMobjpool* pop, PMEM_BUF* buf, TOID(PMEM_BUF_BLOCK)* ptoid_block);
-//pm_buf_write_aio_complete(PMEMobjpool* pop, PMEM_BUF* buf, TOID(PMEM_BUF_BLOCK) toid_block);
-//pm_buf_write_aio_complete(PMEMobjpool* pop, PMEM_BUF* buf, PMEMoid* poid);
+pm_buf_write_aio_complete(
+			PMEMobjpool*			pop,
+		   	PMEM_BUF*				buf,
+		   	TOID(PMEM_BUF_BLOCK)*	ptoid_block);
 
 PMEM_BUF* pm_pop_get_buf(PMEMobjpool* pop);
 
@@ -352,7 +395,7 @@ struct __pmem_flusher {
 	os_event_t			is_req_not_empty; //signaled when there is a new flushing list added
 	os_event_t			is_req_full;
 
-	os_event_t			is_flush_full;
+	//os_event_t			is_flush_full;
 
 	os_event_t			is_all_finished; //signaled when all workers are finished flushing and no pending request 
 	os_event_t			is_all_closed; //signaled when all workers are closed 
@@ -362,11 +405,10 @@ struct __pmem_flusher {
 	ulint size;
 	ulint tail; //always increase, circled counter, mark where the next flush list will be assigned
 	ulint n_requested;
-	ulint n_flushing;
+	//ulint n_flushing;
 
 	bool is_running;
 
-	//PMEM_BUF_BLOCK_LIST* flush_list_arr;
 	PMEM_BUF_BLOCK_LIST** flush_list_arr;
 };
 void
@@ -387,94 +429,26 @@ void
 
 void pm_buf_print_lists_info(PMEM_BUF* buf);
 
-///////// THREAD handler///////////////////////////
-//This struct follow the design of page_cleaner_t
-//Some functions are implemented in buf0flu.cc
-//
-
-
-struct __pmem_list_cleaner_slot {
-	pm_list_cleaner_state		state;
-	ulint						id;
-	//ulint						check;
-	ulint						n_pages_requested;
-					/*!< number of requested pages
-					for the slot */
-	ulint						n_flushed_list;
-					/*!< number of flushed pages
-					by flush_list flushing */
-	bool						succeeded_list;
-					/*!< true if flush_list flushing
-					succeeded. */
-	ulint						flush_pass;
-					/*!< count to attempt flush_list
-					flushing */
-	ulint						last_time;
-
-	TOID(PMEM_BUF_BLOCK_LIST)		flush_list;
-};
-
-
-struct __pmem_list_cleaner {
-	ib_mutex_t			mutex;
-	os_event_t			is_requested;
-	os_event_t			is_finished;
-	volatile ulint		n_workers;
-	bool				requested;/*!< true if requested pages to flush */
-
-	//total slots and number of each slot state
-	ulint				n_slots;
-	ulint				n_slots_requested;
-	ulint				n_slots_flushing;
-	ulint				n_slots_finished;
-	ulint				flush_time;
-	ulint				flush_pass;
-	bool				is_running;
-
-	PMEM_LIST_CLEANER_SLOT*	slots;
-
-	//this may not neccessary
-	lsn_t				lsn_limit;
-
-
-#ifdef UNIV_DEBUG
-	ulint				n_disabled_debug;
-#endif
-
-};
-
-
-void
-pm_list_cleaner_init(void);
-
-void
-pm_list_cleaner_close(void);
-
-void
-pm_lc_request(
-	TOID(PMEM_BUF_BLOCK_LIST) flush_list);
-//void
-//pm_lc_request(
-//	ulint		min_n,
-//	lsn_t		lsn_limit);
-
-ulint
-pm_lc_resume(
-	TOID(PMEM_BUF_BLOCK_LIST) flush_list);
-
-void
-pm_lc_flush_slot(void);
 
 //version 1: implemented in pmem0buf, directly handle without using thread slot
 void
-pm_handle_finished_block(PMEMobjpool* pop, PMEM_BUF* buf, PMEM_BUF_BLOCK* pblock);
+pm_handle_finished_block(
+		PMEMobjpool*		pop,
+	   	PMEM_BUF*			buf,
+	   	PMEM_BUF_BLOCK* pblock);
 
 void
-pm_handle_finished_block_no_free_pool(PMEMobjpool* pop, PMEM_BUF* buf, PMEM_BUF_BLOCK* pblock);
+pm_handle_finished_block_no_free_pool(
+		PMEMobjpool*		pop,
+	   	PMEM_BUF* buf,
+	   	PMEM_BUF_BLOCK* pblock);
 
 //Implemented in buf0flu.cc using with pm_buf_write_with_flsuher
 void
-pm_handle_finished_block_with_flusher(PMEMobjpool* pop, PMEM_BUF* buf, PMEM_BUF_BLOCK* pblock);
+pm_handle_finished_block_with_flusher(
+		PMEMobjpool*		pop,
+	   	PMEM_BUF*			buf,
+	   	PMEM_BUF_BLOCK*		pblock);
 
 //version 2 is implemented in buf0flu.cc that handle threads slot
 void
