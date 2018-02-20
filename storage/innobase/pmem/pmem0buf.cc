@@ -528,8 +528,13 @@ pm_buf_write(
 	//UNIV_MEM_ASSERT_RW(src_data, page_size);
 
 	//PMEM_HASH_KEY(hashed, page_id.fold(), PMEM_N_BUCKETS);
-	hashed = hash_f1(page_id.space(), 
-			page_id.page_no(), PMEM_N_BUCKETS, PMEM_PAGE_PER_BUCKET_BITS);
+#if defined (UNIV_PMEMOBJ_BUF_PARTITION)
+	PMEM_LESS_BUCKET_HASH_KEY(hashed,page_id.space(), page_id.page_no());
+#else //EVEN_BUCKET
+	PMEM_HASH_KEY(hashed, page_id.fold(), PMEM_N_BUCKETS);
+#endif
+	//hashed = hash_f1(page_id.space(), 
+	//		page_id.page_no(), PMEM_N_BUCKETS, PMEM_PAGE_PER_BUCKET_BITS);
 
 retry:
 	//the safe check
@@ -779,8 +784,13 @@ pm_buf_write_no_free_pool(
 	//UNIV_MEM_ASSERT_RW(src_data, page_size);
 
 	//PMEM_HASH_KEY(hashed, page_id.fold(), PMEM_N_BUCKETS);
-	hashed = hash_f1(page_id.space(),
-			page_id.page_no(), PMEM_N_BUCKETS, PMEM_PAGE_PER_BUCKET_BITS);
+#if defined (UNIV_PMEMOBJ_BUF_PARTITION)
+	PMEM_LESS_BUCKET_HASH_KEY(hashed,page_id.space(), page_id.page_no());
+#else //EVEN_BUCKET
+	PMEM_HASH_KEY(hashed, page_id.fold(), PMEM_N_BUCKETS);
+#endif
+//	hashed = hash_f1(page_id.space(),
+//			page_id.page_no(), PMEM_N_BUCKETS, PMEM_PAGE_PER_BUCKET_BITS);
 
 
 retry:
@@ -973,8 +983,13 @@ pm_buf_write_with_flusher(
 
 	//PMEM_HASH_KEY(hashed, page_id.fold(), PMEM_N_BUCKETS);
 
-	hashed = hash_f1(page_id.space(),
-			page_id.page_no(), PMEM_N_BUCKETS, PMEM_PAGE_PER_BUCKET_BITS);
+#if defined (UNIV_PMEMOBJ_BUF_PARTITION)
+	PMEM_LESS_BUCKET_HASH_KEY(hashed,page_id.space(), page_id.page_no());
+#else //EVEN_BUCKET
+	PMEM_HASH_KEY(hashed, page_id.fold(), PMEM_N_BUCKETS);
+#endif
+//	hashed = hash_f1(page_id.space(),
+//			page_id.page_no(), PMEM_N_BUCKETS, PMEM_PAGE_PER_BUCKET_BITS);
 
 retry:
 	//the safe check
@@ -1561,8 +1576,13 @@ pm_buf_read(
 	//bytes_read = 0;
 
 	//PMEM_HASH_KEY(hashed, page_id.fold(), PMEM_N_BUCKETS);
-	hashed = hash_f1(page_id.space(),
-			page_id.page_no(), PMEM_N_BUCKETS, PMEM_PAGE_PER_BUCKET_BITS);
+#if defined (UNIV_PMEMOBJ_BUF_PARTITION)
+	PMEM_LESS_BUCKET_HASH_KEY(hashed,page_id.space(), page_id.page_no());
+#else //EVEN_BUCKET
+	PMEM_HASH_KEY(hashed, page_id.fold(), PMEM_N_BUCKETS);
+#endif
+//	hashed = hash_f1(page_id.space(),
+//			page_id.page_no(), PMEM_N_BUCKETS, PMEM_PAGE_PER_BUCKET_BITS);
 	TOID_ASSIGN(cur_list, (D_RO(buf->buckets)[hashed]).oid);
 	if ( TOID_IS_NULL(cur_list)) {
 		//assert(!TOID_IS_NULL(cur_list));

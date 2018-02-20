@@ -561,10 +561,35 @@ hash_f1(
 	list.cur_size++;\
 }while (0)
 
+/*Evenly distributed map that one space_id evenly distribute across buckets*/
 #define PMEM_HASH_KEY(hashed, key, n) do {\
 	hashed = key ^ PMEM_HASH_MASK;\
 	hashed = hashed % n;\
 }while(0)
+
+#if defined (UNIV_PMEMOBJ_BUF_PARTITION)
+/*LESS_BUCKET partition
+ *One space is mapped with as less buckets as possible
+@hashed		[out]: return hashed value
+@space		[in]: space_no
+@page		[in]: page_no
+@n			[in]: number of buckets 
+@B			[in]: number of bits present number of buckets
+@S			[in]: number of bits present space_no
+@P			[in]: number of bits present max number of pages per space on a bucket, this value is log2(page_per_bucket)
+ * */
+#define PMEM_LESS_BUCKET_HASH_KEY(hashed, space, page)\
+   	PARTITION_FUNC1(hashed, space, page,\
+		   	PMEM_N_BUCKETS,\
+		   	PMEM_N_BUCKET_BITS,\
+		   	PMEM_N_SPACE_BITS,\
+		   	PMEM_PAGE_PER_BUCKET_BITS) 
+
+#define PARTITION_FUNC1(hashed, space, page, n, B, S, P) do {\
+	hashed = (((space & (0xffffffff >> (32 - S))) << (B - S)) + ((page & (0xffffffff >> (32 - P - (B - S)))) >> P)) % n;\
+} while(0)
+#endif //UNIV_PMEMOBJ_BUF_PARTITION
+
 #endif //UNIV_PMEMOBJ_BUF
 
 #endif /*__PMEMOBJ_H__ */
