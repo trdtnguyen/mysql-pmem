@@ -61,7 +61,7 @@ Created 10/25/1995 Heikki Tuuri
 //declare it at storage/innobase/srv/srv0start.cc
 extern PMEM_FILE_COLL* gb_pfc;
 #endif
-#if defined (UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_DBW) || defined(UNIV_PMEMOBJ_BUF)
+#if defined (UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_DBW) || defined(UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_WAL)
 #include "my_pmem_common.h"
 #include "my_pmemobj.h"
 extern PMEM_WRAPPER* gb_pmw;
@@ -5890,6 +5890,9 @@ fil_io(
 	return(err);
 }
 #if defined (UNIV_PMEMOBJ_BUF) 
+/*
+ * pm_fil_io_batch original, without space_oriented sort
+ * */
 dberr_t
 pm_fil_io_batch(
 		const IORequest&	type,
@@ -6127,6 +6130,148 @@ pm_fil_io_batch(
 	return DB_SUCCESS;
 
 }
+#if defined (UNIV_PMEMOBJ_BUF_PARTITION)
+/*
+ *Collect information about mapping a space to a hashed list and store in local heap
+ Call this function every time writing a page form buffer pool to PMEM_BUF
+ * */
+void
+pm_filemap_update_items(
+		PMEM_BUF*		buf,
+	   	page_id_t		page_id,
+		int				hashed_id,
+		uint64_t		bucket_size) {
+	
+	ulint i;
+	ulint j;
+	uint64_t cur_count;
+	uint64_t cur_size;
+
+	PMEM_FILE_MAP* fm = buf->filemap;
+	PMEM_FILE_MAP_ITEM* item;
+
+	cur_size = fm->size;
+	//scan the array, if the input page_id has space exist, increase count 
+	for (i = 0; i < cur_size; i++) {
+		if (fm->items[i]->space_id == page_id.space()) {
+			item = fm->items[i];
+			cur_count = item->count;
+			
+			//scan in the hashed_id array of the item
+			for (j = 0; j < cur_count; j++) {
+				if (item->hashed_ids[j] == hashed_id) {
+					//This hashed_id already counted
+					item->freqs[j]++;
+					break;
+				}
+			}	
+
+			if (j == cur_count) {
+				//new hashed id count
+				item->hashed_ids[cur_count] = hashed_id;
+				item->count++;
+			}
+			break;
+		}
+	}
+	
+	if (i == cur_size) {
+		//New item
+		item = static_cast<PMEM_FILE_MAP_ITEM*> (
+			malloc(sizeof(PMEM_FILE_MAP_ITEM))); 
+
+		item->space_id = page_id.space();	
+		item->count = 0;
+
+		mutex_enter(&fil_system->mutex);
+
+		fil_space_t*	space = fil_space_get_by_id(item->space_id);
+		if( space != NULL) {
+			fil_node_t*	node = UT_LIST_GET_FIRST(space->chain);
+			//bool is_user_ts = fil_is_user_tablespace_id(item->space_id);
+			item->name = static_cast<char*> (
+					malloc(256));
+			strcpy(item->name, node->name);	
+		} 
+
+		mutex_exit(&fil_system->mutex);
+
+		item->hashed_ids = static_cast<int*> (
+			calloc(bucket_size, sizeof(int)));
+		
+		item->freqs = static_cast<uint64_t*> (
+				calloc(bucket_size, sizeof(uint64_t)));
+
+		item->hashed_ids[item->count] = hashed_id;
+		item->freqs[item->count] = 1;
+
+		item->count++;
+		fm->items[cur_size] = item;
+			
+		fm->size++;
+		printf("PMEM_PART add item space_id=%zu, name = %s\n", item->space_id, item->name);
+	}
+	//else
+	//This space_id - hashed_id map already count, does nothing		
+}
+void
+pm_filemap_close(PMEM_BUF* buf){
+	ulint i;
+	PMEM_FILE_MAP* fm = buf->filemap;	
+	PMEM_FILE_MAP_ITEM* item;
+
+		
+	for (i = 0; i < fm->size; i++) {
+		item = fm->items[i];	
+		if (buf->filemap->items[i] != NULL) {
+			free(buf->filemap->items[i]->name);
+			free(buf->filemap->items[i]->hashed_ids);
+			buf->filemap->items[i]->hashed_ids = NULL;
+
+			free(buf->filemap->items[i]->freqs);
+			buf->filemap->items[i]->freqs = NULL;
+
+			free(buf->filemap->items[i]);
+		}
+		buf->filemap->items[i]=NULL;
+	}
+
+	if (buf->filemap->items != NULL){
+		free(buf->filemap->items);
+		buf->filemap->items = NULL;
+	}
+	
+	free (buf->filemap);
+	buf->filemap = NULL;
+}
+void
+pm_filemap_print(
+		PMEM_BUF*		buf, 
+		FILE*			f){
+	ulint i;
+	ulint j;
+	PMEM_FILE_MAP* fm = buf->filemap;	
+	PMEM_FILE_MAP_ITEM* item;
+	
+	fprintf(f, "Number of spaces =%zu\n", fm->size);
+	
+
+	for (i = 0; i < fm->size; i++) {
+		item = fm->items[i];
+
+			fprintf(f, "==== Space %zu sp_name %s apears on %zu hashed list: ( ", item->space_id, item->name,  item->count);
+		//print a pair (hashed_id, freq) for each item
+		for (j = 0; j < item->count; j++) {
+			fprintf(f,"[%zu,%zu] ",
+				   	item->hashed_ids[j],
+					item->freqs[j]);
+		}
+		fprintf(f, " ) ======\n");
+	}	
+	
+}
+#endif //UNIV_PMEMOBJ_BUF_PARTITION
+
 #endif //UNIV_PMEMOBJ_BUF
 
 #ifndef UNIV_HOTBACKUP

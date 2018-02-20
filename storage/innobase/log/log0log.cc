@@ -57,7 +57,7 @@ Created 12/9/1995 Heikki Tuuri
 #include "sync0sync.h"
 #endif /* !UNIV_HOTBACKUP */
 
-#if defined(UNIV_PMEMOBJ_LOG) || defined(UNIV_PMEMOBJ_BUF)
+#if defined(UNIV_PMEMOBJ_LOG) || defined(UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_WAL)
 #include "my_pmemobj.h"
 
 extern PMEM_WRAPPER* gb_pmw;
@@ -1002,6 +1002,28 @@ log_io_complete(
 /*============*/
 	log_group_t*	group)	/*!< in: log group or a dummy pointer */
 {
+#if defined (UNIV_PMEMOBJ_LOG)
+	//In original: This function called by fil_aio_wait as async call from log_checkpoint
+	//In our PMEMOBJ_LOG, log_write_up_to use async too, so we need distinguish between two cases
+		
+	if (((ulint) group & 0x1UL)==0) {
+		//This call from log_write_up_to
+		//Just flush
+		switch (srv_unix_file_flush_method) {
+		case SRV_UNIX_O_DSYNC:
+		case SRV_UNIX_NOSYNC:
+			break;
+		case SRV_UNIX_FSYNC:
+		case SRV_UNIX_LITTLESYNC:
+		case SRV_UNIX_O_DIRECT:
+		case SRV_UNIX_O_DIRECT_NO_FSYNC:
+			fil_flush(group->space_id);
+		}
+		return;
+	}
+	//Case 2: follow the original code below
+#endif //UNIV_PMEMOBJ_LOG
+
 	if ((ulint) group & 0x1UL) {
 		/* It was a checkpoint write */
 		group = (log_group_t*)((ulint) group - 1);
@@ -1201,13 +1223,21 @@ loop:
 
 	const ulint	page_no
 		= (ulint) (next_offset / univ_page_size.physical());
-
+#if defined (UNIV_PMEMOBJ_LOG)
+	//We can write async when the log buffer is in PMEM
+	//We don't adjust group to group + 1 because we already handled that in log_io_complete
+	fil_io(IORequestLogWrite, false,
+	       page_id_t(group->space_id, page_no),
+	       univ_page_size,
+	       (ulint) (next_offset % UNIV_PAGE_SIZE), write_len, buf,
+	       group);
+#else //original
 	fil_io(IORequestLogWrite, true,
 	       page_id_t(group->space_id, page_no),
 	       univ_page_size,
 	       (ulint) (next_offset % UNIV_PAGE_SIZE), write_len, buf,
 	       group);
-
+#endif
 	srv_stats.os_log_pending_writes.dec();
 
 	srv_stats.os_log_written.add(write_len);

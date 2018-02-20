@@ -33,11 +33,11 @@ Created 12/9/1995 Heikki Tuuri
 #include "mtr0types.h"
 #endif /* UNIV_LOG_LSN_DEBUG */
 
-#if defined(UNIV_PMEMOBJ_LOG)
-//This defined in log0log.cc
+//#if defined(UNIV_PMEMOBJ_LOG)
+////This defined in log0log.cc
 //#include "my_pmemobj.h"
 //extern PMEM_WRAPPER* gb_pmw;
-#endif
+//#endif
 
 /************************************************************//**
 Gets a log block flush bit.
@@ -419,7 +419,7 @@ log_reserve_and_write_fast(
 
 	log_sys->lsn += len;
 //#if defined(UNIV_PMEMOBJ_LOG)
-//	//Update lsn and buf_free
+	//Update lsn and buf_free
 //	gb_pmw->plogbuf->lsn = log_sys->lsn;
 //	gb_pmw->plogbuf->buf_free = log_sys->buf_free;
 //#endif

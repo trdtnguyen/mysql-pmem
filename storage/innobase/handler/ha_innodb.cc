@@ -3706,24 +3706,17 @@ innobase_init(
 		srv_aio_n_slots_per_seg = 256;
 	}
 #endif
-#if defined(UNIV_PMEMOBJ_BUF) 
-	if (!srv_pmem_buf_bucket_size) {
-		srv_pmem_buf_bucket_size = 256;
-	}
-#endif 
-#if defined (UNIV_PMEMOBJ_BUF_FLUSHER)
-	if (!srv_pmem_n_flush_threads) {
-		srv_pmem_n_flush_threads = 8;
-	}
-
-#endif 
-
-#if defined(UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_LOG)
+#if defined(UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_WAL)
 	if (!srv_pmem_home_dir) {
 		srv_pmem_home_dir = (char*) "/mnt/pmem1";
 	}
 	if (!srv_pmem_pool_size) {
 		srv_pmem_pool_size = 8 * 1024; //8 GB
+	}
+#endif
+#if defined(UNIV_PMEMOBJ_BUF) 
+	if (!srv_pmem_buf_bucket_size) {
+		srv_pmem_buf_bucket_size = 256;
 	}
 	if (!srv_pmem_buf_size) {
 		srv_pmem_buf_size = 4 * 1024 ; //4 GB
@@ -3734,7 +3727,20 @@ innobase_init(
 	if (!srv_pmem_buf_flush_pct) {
 		srv_pmem_buf_flush_pct = 0.9; 
 	}
-#endif
+#endif 
+#if defined (UNIV_PMEMOBJ_BUF_FLUSHER)
+	if (!srv_pmem_n_flush_threads) {
+		srv_pmem_n_flush_threads = 8;
+	}
+#endif 
+#if defined (UNIV_PMEMOBJ_BUF_PARTITION)
+	if (!srv_pmem_n_space_bits) {
+		srv_pmem_n_space_bits = 5;
+	}
+	if (!srv_pmem_page_per_bucket_bits) {
+		srv_pmem_page_per_bucket_bits = 8;
+	}
+#endif 
 	if (!srv_log_group_home_dir) {
 		srv_log_group_home_dir = default_path;
 	}
@@ -19506,6 +19512,16 @@ static MYSQL_SYSVAR_ULONG(pmem_n_flush_threads, srv_pmem_n_flush_threads,
 
 #endif
 
+#if defined (UNIV_PMEMOBJ_BUF_PARTITION)
+static MYSQL_SYSVAR_ULONG(pmem_n_space_bits, srv_pmem_n_space_bits,
+  PLUGIN_VAR_RQCMDARG | PLUGIN_VAR_READONLY,
+  "Number of bits present a page_no in partition algorithm, from 1 to 32 (space_no is 4-bytes number), default is 5.",
+  NULL, NULL, 5, 1, 32,0);
+static MYSQL_SYSVAR_ULONG(pmem_page_per_bucket_bits, srv_pmem_page_per_bucket_bits,
+  PLUGIN_VAR_RQCMDARG | PLUGIN_VAR_READONLY,
+  "Number of bits present the maxmum number of pages per space in a bucket in partition algorithm, from 1 to log2(srv_pmem_buf_bucket_size), default is 10.",
+  NULL, NULL, 10, 1, 32, 0);
+#endif 
 #if defined (UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_LOG) 
 static MYSQL_SYSVAR_STR(pmem_home_dir, srv_pmem_home_dir,
   PLUGIN_VAR_RQCMDARG | PLUGIN_VAR_READONLY,
@@ -20344,6 +20360,10 @@ static struct st_mysql_sys_var* innobase_system_variables[]= {
 #if defined (UNIV_PMEMOBJ_BUF_FLUSHER)
   MYSQL_SYSVAR(pmem_n_flush_threads),
 #endif 
+#if defined (UNIV_PMEMOBJ_BUF_PARTITION)
+  MYSQL_SYSVAR(pmem_n_space_bits),
+  MYSQL_SYSVAR(pmem_page_per_bucket_bits),
+#endif
 #if defined (UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_LOG) 
   MYSQL_SYSVAR(pmem_home_dir),
   MYSQL_SYSVAR(pmem_pool_size),

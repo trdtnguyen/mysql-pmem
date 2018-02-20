@@ -1758,6 +1758,9 @@ innobase_start_or_create_for_mysql(void)
 	#ifdef UNIV_PMEMOBJ_BUF_FLUSHER
 		ib::info() << "======= Hello PMEMOBJ Buffer with FLUSHER from VLDB lab ========\n";
 	#endif
+	#ifdef UNIV_PMEMOBJ_BUF_PARTITION
+		ib::info() << "======= Hello PMEMOBJ Buffer with PARTITION from VLDB lab ========\n";
+	#endif
 	#ifdef UNIV_PMEMOBJ_BUF_V2
 		ib::info() << "======= Hello PMEMOBJ Buffer (Ver. 2 No free pool) from VLDB lab ========\n";
 	#endif 

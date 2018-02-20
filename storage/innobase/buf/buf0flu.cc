@@ -1047,7 +1047,12 @@ buf_flush_write_block_low(
 
 	/* Force the log to the disk before writing the modified block */
 	if (!srv_read_only_mode) {
+#if defined (UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_WAL)
+		//Since the log records are persist in NVM we don't need to follow WAL rule
+		//Skip flush log here
+#else //original 
 		log_write_up_to(bpage->newest_modification, true);
+#endif
 	}
 
 	switch (buf_page_get_state(bpage)) {

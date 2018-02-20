@@ -70,6 +70,16 @@ typedef struct __pmem_flusher PMEM_FLUSHER;
 
 struct __pmem_buf_bucket_stat;
 typedef struct __pmem_buf_bucket_stat PMEM_BUCKET_STAT;
+
+struct __pmem_file_map_item;
+typedef struct __pmem_file_map_item PMEM_FILE_MAP_ITEM;
+
+struct __pmem_file_map;
+typedef struct __pmem_file_map PMEM_FILE_MAP;
+
+struct __pmem_sort_obj;
+typedef struct __pmem_sort_obj PMEM_SORT_OBJ;
+
 #endif //UNIV_PMEMOBJ_BUF
 
 POBJ_LAYOUT_BEGIN(my_pmemobj);
@@ -279,7 +289,58 @@ struct __pmem_buf {
 	PMEM_AIO_PARAM** params_arr;
 	
 	PMEM_FLUSHER* flusher;	
+
+	PMEM_FILE_MAP* filemap;
 };
+
+// PARTITION //////////////
+/*Map space id to hashed_id, for partition purpose
+ * */
+struct __pmem_file_map_item {
+	uint32_t		space_id;
+	char*			name;
+
+	int*			hashed_ids; //list of hash_id this space appears on 
+	uint64_t		count; //number of hashed list this space appears on
+
+	uint64_t*		freqs; //freq[i] is the number of times this space apearts on hashed_ids[i]
+};
+struct __pmem_file_map {
+	PMEMrwlock			lock;
+
+	uint64_t					max_size;
+	uint64_t					size;
+	PMEM_FILE_MAP_ITEM**		items;
+};
+
+//this struct for space_oriented sort
+struct __pmem_sort_obj {
+	uint32_t			space_no;
+	
+	uint32_t			n_blocks;
+	uint32_t*			block_indexes;
+};
+
+void 
+pm_filemap_init(
+		PMEM_BUF*		buf);
+void
+pm_filemap_close(PMEM_BUF* buf);
+
+/*Update the page_id in the filemap
+ *
+ * */
+void
+pm_filemap_update_items(
+		PMEM_BUF*		buf,
+	   	page_id_t		page_id,
+		int				hashed_id,
+		uint64_t		bucket_size); 
+
+void
+pm_filemap_print(
+		PMEM_BUF*		buf, 
+		FILE*			outfile);
 
 #if defined(UNIV_PMEMOBJ_BUF_STAT)
 //statistic info about a bucket
@@ -287,12 +348,12 @@ struct __pmem_buf {
 struct __pmem_buf_bucket_stat {
 	PMEMrwlock		lock;
 
-	uint64_t		n_writes;
-	uint64_t		n_overwrites;
-	uint64_t		n_reads;	
-	uint64_t		n_reads_flushing;	
+	uint64_t		n_writes;/*number of writes on the bucket*/ 
+	uint64_t		n_overwrites;/*number of overwrites on the bucket*/
+	uint64_t		n_reads;/*number of reads on the list (both flushing and normal)*/	
+	uint64_t		n_reads_flushing;/*number of reads on the on-flushing list*/	
 	uint64_t		max_linked_lists;
-	uint64_t		n_flushed_lists;
+	uint64_t		n_flushed_lists; /*number of of flushes on the bucket*/
 };
 
 #endif
@@ -488,6 +549,12 @@ void
 pm_buf_flush_list_cleaner_disabled_loop(void);
 #endif
 
+ulint 
+hash_f1(
+		uint32_t		space_no,
+	   	uint32_t		page_no,
+	   	uint64_t		n_buckets,
+		uint64_t		page_per_bucket_bits);
 
 #define PMEM_BUF_LIST_INSERT(pop, list, entries, type, func, args) do {\
 	POBJ_LIST_INSERT_NEW_HEAD(pop, &list.head, entries, sizeof(type), func, &args); \

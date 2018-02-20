@@ -29,7 +29,55 @@ static uint64_t PMEM_BUCKET_SIZE;
 static double PMEM_BUF_FLUSH_PCT;
 
 static uint64_t PMEM_N_FLUSH_THREADS;
+//set this to large number to eliminate 
+//static uint64_t PMEM_PAGE_PER_BUCKET_BITS=32;
 
+#if defined (UNIV_PMEMOBJ_BUF_PARTITION)
+//256 buckets => 8 bits, max 32 spaces => 5 bits => need 3 = 8 - 5 bits
+static uint64_t PMEM_N_BUCKET_BITS = 8;
+static uint64_t PMEM_N_SPACE_BITS = 5;
+static uint64_t PMEM_PAGE_PER_BUCKET_BITS=10;
+
+static FILE* debug_file = fopen("part_debug.txt","w");
+
+/*
+ * LESS_BUCKET partition
+ * space_no and page_no are 32-bits value
+ * the hashed value is B-bits value where B is the number of bits to present the number of buckets 
+ * One space_no in a bucket has maximum N pages where log2(N) is page_per_bucket_bits
+ * @space_no [in]: space number
+ * @page_no	[in]: page number
+ * @ n_buckets [in]: number of buckets
+ * @ page_per_bucket_bits [in]: number of bits present the maximum number of pages each space in a hash list can have
+ * 
+ * */
+ulint 
+hash_f1(
+		uint32_t		space_no,
+	   	uint32_t		page_no,
+	   	uint64_t		n_buckets,
+		uint64_t		page_per_bucket_bits)
+{	
+	ulint hashed;
+
+	uint32_t mask1 = 0xffffffff >> (32 - PMEM_N_SPACE_BITS);
+	uint32_t mask2 = 0xffffffff >> 
+		(32 - page_per_bucket_bits - (PMEM_N_BUCKET_BITS - PMEM_N_SPACE_BITS)) ;
+
+	ulint p;
+	ulint s;
+
+	s = (space_no & mask1) << (PMEM_N_BUCKET_BITS - PMEM_N_SPACE_BITS);
+	p = (page_no & mask2) >> page_per_bucket_bits;
+
+	hashed = (p + s) % n_buckets;
+
+	//printf("space %zu (0x%08x) page %zu (0x%08x)  p 0x%016x s 0x%016x hashed %zu (0x%016x) \n",
+	//		space_no, space_no, page_no, page_no, p, s, hashed, hashed);
+
+	return hashed;
+}
+#endif //UNIV_PMEMOBJ_BUF_PARTITION
 void
 pm_wrapper_buf_alloc_or_open(
 		PMEM_WRAPPER*		pmw,
@@ -47,6 +95,13 @@ pm_wrapper_buf_alloc_or_open(
 	PMEM_N_FLUSH_THREADS= srv_pmem_n_flush_threads;
 #endif
 
+#if defined (UNIV_PMEMOBJ_BUF_PARTITION)
+	PMEM_N_BUCKET_BITS = log2(srv_pmem_buf_n_buckets);
+	PMEM_N_SPACE_BITS = srv_pmem_n_space_bits;
+	PMEM_PAGE_PER_BUCKET_BITS = srv_pmem_page_per_bucket_bits;
+	printf("======> >> > >PMEM PARTITION: n_bucket_bits %zu n_space_bits %zu page_per_bucket_bits %zu\n",
+			PMEM_N_BUCKET_BITS, PMEM_N_SPACE_BITS, PMEM_PAGE_PER_BUCKET_BITS);
+#endif 
 	if (!pmw->pbuf) {
 		//Case 1: Alocate new buffer in PMEM
 			printf("PMEMOBJ_INFO: allocate %zd MB of buffer in pmem\n", buf_size);
@@ -100,6 +155,12 @@ pm_wrapper_buf_alloc_or_open(
 void pm_wrapper_buf_close(PMEM_WRAPPER* pmw) {
 	uint64_t i;
 
+#if defined (UNIV_PMEMOBJ_BUF_PARTITION_STAT)
+	//pm_filemap_print(pmw->pbuf, pmw->pbuf->deb_file);
+	pm_filemap_print(pmw->pbuf, debug_file);
+	pm_filemap_close(pmw->pbuf);
+#endif
+
 	for ( i = 0; i < PMEM_N_BUCKETS; i++) {
 		os_event_destroy(pmw->pbuf->flush_events[i]); 
 	}
@@ -115,6 +176,8 @@ void pm_wrapper_buf_close(PMEM_WRAPPER* pmw) {
 	//Free the flusher
 	pm_buf_flusher_close(pmw->pbuf);
 #endif 
+
+	fclose(pmw->pbuf->deb_file);
 }
 
 int
@@ -152,7 +215,7 @@ pm_pop_buf_alloc(
 	assert(ut_is_2pow(page_size));
 	align_size = ut_uint64_align_up(size, page_size);
 
-	pbuf->deb_file = fopen("debug.txt","w");
+	pbuf->deb_file = fopen("part_debug.txt","w");
 
 	pbuf->size = align_size;
 	pbuf->page_size = page_size;
@@ -179,9 +242,12 @@ pm_pop_buf_alloc(
 	pm_buf_bucket_stat_init(pbuf);
 #endif	
 #if defined(UNIV_PMEMOBJ_BUF_FLUSHER)
-	//init threads for handle flushing
+	//init threads for handle flushing, implement in buf0flu.cc
 	pm_flusher_init(pbuf, PMEM_N_FLUSH_THREADS);
 #endif 
+#if defined (UNIV_PMEMOBJ_BUF_PARTITION_STAT)
+	pm_filemap_init(pbuf);
+#endif
 	pmemobj_persist(pop, pbuf, sizeof(*pbuf));
 	return pbuf;
 } 
@@ -461,7 +527,9 @@ pm_buf_write(
 	page_size = size.physical();
 	//UNIV_MEM_ASSERT_RW(src_data, page_size);
 
-	PMEM_HASH_KEY(hashed, page_id.fold(), PMEM_N_BUCKETS);
+	//PMEM_HASH_KEY(hashed, page_id.fold(), PMEM_N_BUCKETS);
+	hashed = hash_f1(page_id.space(), 
+			page_id.page_no(), PMEM_N_BUCKETS, PMEM_PAGE_PER_BUCKET_BITS);
 
 retry:
 	//the safe check
@@ -710,7 +778,9 @@ pm_buf_write_no_free_pool(
 	page_size = size.physical();
 	//UNIV_MEM_ASSERT_RW(src_data, page_size);
 
-	PMEM_HASH_KEY(hashed, page_id.fold(), PMEM_N_BUCKETS);
+	//PMEM_HASH_KEY(hashed, page_id.fold(), PMEM_N_BUCKETS);
+	hashed = hash_f1(page_id.space(),
+			page_id.page_no(), PMEM_N_BUCKETS, PMEM_PAGE_PER_BUCKET_BITS);
 
 
 retry:
@@ -901,8 +971,10 @@ pm_buf_write_with_flusher(
 	page_size = size.physical();
 	//UNIV_MEM_ASSERT_RW(src_data, page_size);
 
-	PMEM_HASH_KEY(hashed, page_id.fold(), PMEM_N_BUCKETS);
+	//PMEM_HASH_KEY(hashed, page_id.fold(), PMEM_N_BUCKETS);
 
+	hashed = hash_f1(page_id.space(),
+			page_id.page_no(), PMEM_N_BUCKETS, PMEM_PAGE_PER_BUCKET_BITS);
 
 retry:
 	//the safe check
@@ -989,7 +1061,11 @@ retry:
 #endif	
 
 	// (2) At this point, we get the free and un-blocked block, write data to this block
-
+#if defined (UNIV_PMEMOBJ_BUF_PARTITION_STAT)
+	pmemobj_rwlock_wrlock(pop, &buf->filemap->lock);
+	pm_filemap_update_items(buf, page_id, hashed, PMEM_BUCKET_SIZE);
+	pmemobj_rwlock_unlock(pop, &buf->filemap->lock);
+#endif 
 	//D_RW(free_block)->bpage = bpage;
 	pfree_block->sync = sync;
 
@@ -1040,8 +1116,8 @@ assign_worker:
 			goto assign_worker;	
 		}
 			
+		//find an idle thread to assign flushing task
 		ulint n_try = flusher->size;
-
 		while (n_try > 0) {
 			if (flusher->flush_list_arr[flusher->tail] == NULL) {
 				//found
@@ -1484,7 +1560,9 @@ pm_buf_read(
 	}
 	//bytes_read = 0;
 
-	PMEM_HASH_KEY(hashed, page_id.fold(), PMEM_N_BUCKETS);
+	//PMEM_HASH_KEY(hashed, page_id.fold(), PMEM_N_BUCKETS);
+	hashed = hash_f1(page_id.space(),
+			page_id.page_no(), PMEM_N_BUCKETS, PMEM_PAGE_PER_BUCKET_BITS);
 	TOID_ASSIGN(cur_list, (D_RO(buf->buckets)[hashed]).oid);
 	if ( TOID_IS_NULL(cur_list)) {
 		//assert(!TOID_IS_NULL(cur_list));
@@ -1558,6 +1636,37 @@ pm_buf_read(
 		return NULL;
 //	}
 }
+
+///////////////////////// PARTITION ///////////////////////////
+#if defined (UNIV_PMEMOBJ_BUF_PARTITION_STAT)
+void 
+pm_filemap_init(
+		PMEM_BUF*		buf){
+	
+	ulint i;
+	PMEM_FILE_MAP* fm;
+
+	fm = static_cast<PMEM_FILE_MAP*> (malloc(sizeof(PMEM_FILE_MAP)));
+	fm->max_size = 1024*1024;
+	fm->items = static_cast<PMEM_FILE_MAP_ITEM**> (
+		calloc(fm->max_size, sizeof(PMEM_FILE_MAP_ITEM*)));	
+	//for (i = 0; i < fm->max_size; i++) {
+	//	fm->items[i].count = 0
+	//	fm->item[i].hashed_ids = static_cast<int*> (
+	//			calloc(PMEM_BUCKET_SIZE, sizeof(int)));
+	//}
+
+	fm->size = 0;
+
+	buf->filemap = fm;
+}
+
+
+#endif //UNIV_PMEMOBJ_PARTITION
+
+//						END OF PARTITION//////////////////////
+
+
 //////////////////////// STATISTICS FUNCTS/////////////////////
 
 #if defined (UNIV_PMEMOBJ_BUF_STAT)

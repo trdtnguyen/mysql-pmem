@@ -210,6 +210,11 @@ ulong	srv_pmem_buf_bucket_size	= 256;
 #if defined(UNIV_PMEMOBJ_BUF_FLUSHER)
 ulong	srv_pmem_n_flush_threads	= 8;
 #endif
+#if defined (UNIV_PMEMOBJ_BUF_PARTITION)
+ulong	srv_pmem_n_space_bits	= 5;
+ulong	srv_pmem_page_per_bucket_bits	= 10;
+
+#endif
 
 #if defined(UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_LOG) 
 char*	srv_pmem_home_dir	= NULL;
