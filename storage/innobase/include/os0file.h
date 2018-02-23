@@ -1505,6 +1505,8 @@ pfs_os_aio_func(
 #if defined (UNIV_PMEMOBJ_BUF)  
 struct __pmem_aio_param;
 typedef struct __pmem_aio_param PMEM_AIO_PARAM;
+struct __pmem_aio_param_arr;
+typedef struct __pmem_aio_param_arr PMEM_AIO_PARAM_ARRAY;
 
 struct __pmem_aio_param {
 	const char*			name;
@@ -1514,6 +1516,10 @@ struct __pmem_aio_param {
 	ulint				n;	
 	fil_node_t*			m1;
 	void*				m2;
+};
+struct __pmem_aio_param_arr {
+	bool	is_free;
+	PMEM_AIO_PARAM* params;
 };
 
 UNIV_INLINE

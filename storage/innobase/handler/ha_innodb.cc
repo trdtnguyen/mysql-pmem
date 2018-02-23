@@ -4448,7 +4448,7 @@ innobase_commit(
 
 		/* Now do a write + flush of logs. */
 		if (!read_only) {
-#if defined(UNIV_PMEMOBJ_LOG)
+#if defined(UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_WAL)
 			/*Set this flag to true make the trx_commit_complete_for_mysql() do nothing
 			//Since the log buffer now is in NVDIMM, we can safely skip writting
 			//and flushing log records when the transaction commit
@@ -19522,7 +19522,7 @@ static MYSQL_SYSVAR_ULONG(pmem_page_per_bucket_bits, srv_pmem_page_per_bucket_bi
   "Number of bits present the maxmum number of pages per space in a bucket in partition algorithm, from 1 to log2(srv_pmem_buf_bucket_size), default is 10.",
   NULL, NULL, 10, 1, 32, 0);
 #endif 
-#if defined (UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_LOG) 
+#if defined (UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_WAL)
 static MYSQL_SYSVAR_STR(pmem_home_dir, srv_pmem_home_dir,
   PLUGIN_VAR_RQCMDARG | PLUGIN_VAR_READONLY,
   "Path to PMEM home dir.", NULL, NULL, NULL);
@@ -20364,7 +20364,7 @@ static struct st_mysql_sys_var* innobase_system_variables[]= {
   MYSQL_SYSVAR(pmem_n_space_bits),
   MYSQL_SYSVAR(pmem_page_per_bucket_bits),
 #endif
-#if defined (UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_LOG) 
+#if defined (UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_WAL)
   MYSQL_SYSVAR(pmem_home_dir),
   MYSQL_SYSVAR(pmem_pool_size),
   MYSQL_SYSVAR(pmem_buf_size),

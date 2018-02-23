@@ -216,7 +216,7 @@ ulong	srv_pmem_page_per_bucket_bits	= 10;
 
 #endif
 
-#if defined(UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_LOG) 
+#if defined(UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_WAL)
 char*	srv_pmem_home_dir	= NULL;
 ulong	srv_pmem_pool_size	= 8 * 1024;
 ulong	srv_pmem_buf_size	= 4 * 1024;
@@ -2161,7 +2161,7 @@ srv_master_do_active_tasks(void)
 		MONITOR_SRV_IBUF_MERGE_MICROSECOND, counter_time);
 
 	/* Flush logs if needed */
-#if defined (UNIV_PMEMOBJ_LOG)
+#if defined (UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_WAL)
 	//We don't need to write + flush log every second
 #else //original
 	srv_main_thread_op_info = "flushing log";
@@ -2172,10 +2172,6 @@ srv_master_do_active_tasks(void)
 
 	/* Now see if various tasks that are performed at defined
 	intervals need to be performed. */
-
-	if (srv_shutdown_state > 0) {
-		return;
-	}
 
 	if (srv_shutdown_state > 0) {
 		return;
@@ -2267,7 +2263,7 @@ srv_master_do_idle_tasks(void)
 		MONITOR_SRV_DICT_LRU_MICROSECOND, counter_time);
 
 	/* Flush logs if needed */
-#if defined (UNIV_PMEMOBJ_LOG)
+#if defined (UNIV_PMEMOBJ_LOG) || defined(UNIV_PMEMOBJ_WAL)
 	//We skip the 1s flush log here
 	//Log will flush at log_checkpoint() and when the log buffer is nearly full
 	//See log_reserve_and_open()

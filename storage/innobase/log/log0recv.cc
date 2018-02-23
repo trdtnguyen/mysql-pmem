@@ -68,7 +68,7 @@ bool	recv_replay_file_ops	= true;
 #include "fut0lst.h"
 #endif /* !UNIV_HOTBACKUP */
 
-#if defined(UNIV_PMEMOBJ_LOG)
+#if defined(UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_WAL)
 #include "my_pmemobj.h"
 extern PMEM_WRAPPER* gb_pmw;
 #endif
@@ -4293,7 +4293,7 @@ recv_recovery_from_checkpoint_start(
 
 	log_sys->next_checkpoint_no = checkpoint_no + 1;
 
-#if defined(UNIV_PMEMOBJ_LOG)
+#if defined(UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_WAL)
 	if (	gb_pmw->plogbuf->buf_free > log_sys->buf_free &&
 			gb_pmw->plogbuf->lsn > log_sys->lsn ) {
 		uint64_t len = gb_pmw->plogbuf->buf_free - log_sys->buf_free;

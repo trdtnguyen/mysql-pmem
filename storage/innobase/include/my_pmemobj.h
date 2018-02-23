@@ -250,6 +250,7 @@ struct __pmem_buf_block_list_t {
 	int					check;
 	ulint				last_time;
 	
+	ulint				param_arr_index; //index of the param in the param_arrs used to carry the info of this list
 	//int					flush_worker_id;
 	//bool				is_worker_handling;
 	
@@ -286,12 +287,18 @@ struct __pmem_buf {
 	//Those varables are in DRAM
 	os_event_t*  flush_events; //N flush events for N buckets
 	os_event_t free_pool_event; //event for free_pool
-	PMEM_AIO_PARAM** params_arr;
+	
+
+	PMEMrwlock				param_lock;
+	PMEM_AIO_PARAM_ARRAY* param_arrs;//circular array of pointers
+	ulint			param_arr_size; //size of the array
+	ulint			cur_free_param; //circular index, where the next free params is
 	
 	PMEM_FLUSHER* flusher;	
 
 	PMEM_FILE_MAP* filemap;
 };
+
 
 // PARTITION //////////////
 /*Map space id to hashed_id, for partition purpose
@@ -418,9 +425,27 @@ pm_buf_write_with_flusher(
 		   	page_size_t		size,
 		   	byte*			src_data,
 		   	bool			sync);
+int
+pm_buf_write_with_flusher_append(
+			PMEMobjpool*	pop,
+		   	PMEM_BUF*		buf,
+		   	page_id_t		page_id,
+		   	page_size_t		size,
+		   	byte*			src_data,
+		   	bool			sync);
+
 
 const PMEM_BUF_BLOCK*
 pm_buf_read(
+			PMEMobjpool*		pop,
+		   	PMEM_BUF*			buf,
+		   	const page_id_t		page_id,
+		   	const page_size_t	size,
+		   	byte*				data,
+		   	bool sync);
+
+const PMEM_BUF_BLOCK*
+pm_buf_read_lasted(
 			PMEMobjpool*		pop,
 		   	PMEM_BUF*			buf,
 		   	const page_id_t		page_id,

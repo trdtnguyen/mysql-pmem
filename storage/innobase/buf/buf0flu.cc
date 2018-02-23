@@ -1096,6 +1096,8 @@ buf_flush_write_block_low(
 	int ret = pm_buf_write_no_free_pool(gb_pmw->pop, gb_pmw->pbuf, bpage->id, bpage->size, frame, sync);
 #elif defined (UNIV_PMEMOBJ_BUF_FLUSHER)
 	int ret = pm_buf_write_with_flusher(gb_pmw->pop, gb_pmw->pbuf, bpage->id, bpage->size, frame, sync);
+#elif defined (UNIV_PMEMOBJ_BUF_APPEND)
+	int ret = pm_buf_write_with_flusher_append(gb_pmw->pop, gb_pmw->pbuf, bpage->id, bpage->size, frame, sync);
 #else
 	int ret = pm_buf_write(gb_pmw->pop, gb_pmw->pbuf, bpage->id, bpage->size, frame, sync);
 #endif
@@ -4084,6 +4086,7 @@ retry:
 				plist = flusher->flush_list_arr[i];
 				if (plist)
 				{
+					//***this call aio_batch ***
 					pm_buf_flush_list(gb_pmw->pop, gb_pmw->pbuf, plist);
 					flusher->n_requested--;
 					os_event_set(flusher->is_req_full);
@@ -4095,7 +4098,6 @@ retry:
 		} //end if flusher->n_requested > 0
 
 		if (flusher->n_requested == 0) {
-			//if (srv_shutdown_state != SRV_SHUTDOWN_NONE) {
 			if (buf_page_cleaner_is_active) {
 				//buf_page_cleaner is running, start waiting
 				os_event_reset(flusher->is_req_not_empty);
@@ -4160,6 +4162,14 @@ pm_handle_finished_block_with_flusher(
 		//Now all pages in this list are persistent in disk
 		//(0) flush spaces
 		pm_buf_flush_spaces_in_list(pop, buf, pflush_list);
+		// Reset the param_array
+		ulint arr_idx;
+		arr_idx = pflush_list->param_arr_index;
+		assert(arr_idx >= 0);
+
+		pmemobj_rwlock_wrlock(pop, &buf->param_lock);
+		buf->param_arrs[arr_idx].is_free = true;
+		pmemobj_rwlock_unlock(pop, &buf->param_lock);
 
 		//(1) Reset blocks in the list
 		ulint i;

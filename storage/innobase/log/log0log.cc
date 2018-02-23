@@ -224,7 +224,7 @@ log_buffer_extend(
 
 	log_sys->buf_free -= move_start;
 	log_sys->buf_next_to_write -= move_start;
-#if defined (UNIV_PMEMOBJ_LOG)
+#if defined (UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_WAL)
 	/* reallocate log buffer */
 	srv_log_buffer_size = len / UNIV_PAGE_SIZE + 1;
 	//do not free here, does it by our API
@@ -472,7 +472,7 @@ part_loop:
 			- LOG_BLOCK_TRL_SIZE;
 	}
 
-#if defined (UNIV_PMEMOBJ_LOG)
+#if defined (UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_WAL)
 	//copy the trasaction's log records to persistent memory
 	pmemobj_memcpy_persist(gb_pmw->pop, log->buf + log->buf_free, str, len);
 	//set the flag here
@@ -512,7 +512,7 @@ part_loop:
 	if (str_len > 0) {
 		goto part_loop;
 	}
-#if defined(UNIV_PMEMOBJ_LOG)
+#if defined(UNIV_PMEMOBJ_LOG) || defined(UNIV_PMEMOBJ_WAL)
 	// update the lsn and buf_free
 	gb_pmw->plogbuf->lsn = log->lsn;
 	gb_pmw->plogbuf->buf_free = log->buf_free;	
@@ -860,7 +860,7 @@ log_init(void)
 	ut_a(LOG_BUFFER_SIZE >= 4 * UNIV_PAGE_SIZE);
 
 	log_sys->buf_size = LOG_BUFFER_SIZE;
-#if defined(UNIV_PMEMOBJ_LOG)
+#if defined(UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_WAL)
 	//allocate the log buffer in persistent memory
 	if (!gb_pmw->plogbuf){
 		if ( pm_wrapper_logbuf_alloc(gb_pmw, 2 * LOG_BUFFER_SIZE + OS_FILE_LOG_BLOCK_SIZE)
@@ -929,7 +929,7 @@ log_init(void)
 
 	log_sys->buf_free = LOG_BLOCK_HDR_SIZE;
 	log_sys->lsn = LOG_START_LSN + LOG_BLOCK_HDR_SIZE;
-#if defined(UNIV_PMEMOBJ_LOG)
+#if defined(UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_WAL)
 	//Update the lsn, buf_free in necessary
 	if(gb_pmw->plogbuf->lsn < log_sys->lsn)
 		gb_pmw->plogbuf->lsn = log_sys->lsn;
@@ -1002,7 +1002,7 @@ log_io_complete(
 /*============*/
 	log_group_t*	group)	/*!< in: log group or a dummy pointer */
 {
-#if defined (UNIV_PMEMOBJ_LOG)
+#if defined (UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_WAL)
 	//In original: This function called by fil_aio_wait as async call from log_checkpoint
 	//In our PMEMOBJ_LOG, log_write_up_to use async too, so we need distinguish between two cases
 		
@@ -1223,7 +1223,7 @@ loop:
 
 	const ulint	page_no
 		= (ulint) (next_offset / univ_page_size.physical());
-#if defined (UNIV_PMEMOBJ_LOG)
+#if defined (UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_WAL)
 	//We can write async when the log buffer is in PMEM
 	//We don't adjust group to group + 1 because we already handled that in log_io_complete
 	fil_io(IORequestLogWrite, false,
@@ -2631,7 +2631,7 @@ log_shutdown(void)
 /*==============*/
 {
 	log_group_close_all();
-#if defined(UNIV_PMEMOBJ_LOG)
+#if defined(UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_WAL)
 	//The pmem free() is done later
 	//do nothing for log_sys->buf_ptr
 #else //original

@@ -116,7 +116,7 @@ extern bool srv_lzo_disabled;
 #include "pmem_log.h"
 #endif
 
-#if defined (UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_BUF)
+#if defined (UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_BUF) || defined(UNIV_PMEMOBJ_WAL)
 #include <libpmem.h>
 #include <libpmemobj.h>
 #include "my_pmemobj.h"
@@ -177,7 +177,7 @@ static pfs_os_file_t	files[1000];
 /** global PMEM_FILE_COLL object*/
 PMEM_FILE_COLL* gb_pfc;
 #endif
-#if defined (UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_BUF)
+#if defined (UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_WAL)
 /*global PMEMobjpool*/
 char  PMEM_FILE_PATH [PMEM_MAX_FILE_NAME_LENGTH];
 extern PMEM_WRAPPER* gb_pmw;
@@ -1745,7 +1745,7 @@ innobase_start_or_create_for_mysql(void)
 	ib::info() << "Hello NVM Log from VLDB lab ========\n";
 	gb_pfc = pfc_new(srv_log_file_size);
 #endif
-#if defined (UNIV_PMEMOBJ_LOG) || defined(UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_BUF)
+#if defined (UNIV_PMEMOBJ_LOG) || defined(UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_WAL)
 	#ifdef UNIV_PMEMOBJ_LOG
 		ib::info() << "======= Hello PMEMOBJ Log from VLDB lab ========\n";
 	#endif
@@ -1756,13 +1756,19 @@ innobase_start_or_create_for_mysql(void)
 		ib::info() << "======= Hello PMEMOBJ Buffer from VLDB lab ========\n";
 	#endif
 	#ifdef UNIV_PMEMOBJ_BUF_FLUSHER
-		ib::info() << "======= Hello PMEMOBJ Buffer with FLUSHER from VLDB lab ========\n";
+		ib::info() << "+++++ PMEMOBJ_BUF with add-in FLUSHER threads ========\n";
 	#endif
 	#ifdef UNIV_PMEMOBJ_BUF_PARTITION
-		ib::info() << "======= Hello PMEMOBJ Buffer with PARTITION from VLDB lab ========\n";
+		ib::info() << "+++++ PMEMOBJ_BUF with add-in PARTITION algorithms ========\n";
+	#endif
+	#ifdef UNIV_PMEMOBJ_BUF_APPEND
+		ib::info() << "+++++ PMEMOBJ_BUF with add-in APPEND mode ========\n";
 	#endif
 	#ifdef UNIV_PMEMOBJ_BUF_V2
 		ib::info() << "======= Hello PMEMOBJ Buffer (Ver. 2 No free pool) from VLDB lab ========\n";
+	#endif 
+	#ifdef UNIV_PMEMOBJ_WAL
+		ib::info() << "======= Hello PMEMOBJ WAL from VLDB lab ========\n";
 	#endif 
 	ib::info() << "======== pool_size =" << srv_pmem_pool_size << 
 		"MB; srv_pmem_buf_size= " << srv_pmem_buf_size << "MB; " <<
@@ -2841,7 +2847,7 @@ innobase_shutdown_for_mysql(void)
 			" inside InnoDB at shutdown";
 	}
 
-#if defined (UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_DBW) || defined(UNIV_PMEMOBJ_BUF)
+#if defined (UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_DBW) || defined(UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_WAL)
 #if defined (UNIV_PMEMOBJ_BUF_STAT)
 	//Print the statistic info
 	pm_buf_stat_print_all(gb_pmw->pbuf);	

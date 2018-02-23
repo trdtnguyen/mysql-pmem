@@ -195,7 +195,11 @@ buf_read_page_low(
 	);
 #if defined (UNIV_PMEMOBJ_BUF)
 	//size_t read_bytes=  pm_buf_read(gb_pmw->pop, gb_pmw->pbuf, page_id, page_size, (byte*)dst, sync);
+#if defined (UNIV_PMEMOBJ_BUF_APPEND)
+	const PMEM_BUF_BLOCK* pblock=  pm_buf_read_lasted(gb_pmw->pop, gb_pmw->pbuf, page_id, page_size, (byte*)dst, sync);
+#else
 	const PMEM_BUF_BLOCK* pblock=  pm_buf_read(gb_pmw->pop, gb_pmw->pbuf, page_id, page_size, (byte*)dst, sync);
+#endif
 	//if (read_bytes > 0) {
 	if (pblock) {
 		if (sync) {

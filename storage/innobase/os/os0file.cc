@@ -7371,7 +7371,8 @@ start_submit:
 	wrapper = &m_seg_wrapper_arr[local_seg];
 	assert (wrapper->local_index == local_seg);
 	wrapper->io_pending = 0;
-
+	
+	//this loop does assign parameters from input params to io_cb
 	for (i = count, slot_i = local_seg * slots_per_seg;
 		   	i < n_params && slot_i < m_slots.size();
 		   	++slot_i, ++i) {

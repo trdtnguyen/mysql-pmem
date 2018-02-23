@@ -5930,8 +5930,34 @@ pm_fil_io_batch(
 	plist->n_flush = 0;
 #endif 	
 	assert(plist->hashed_id != PMEM_ID_NONE);
+	
+	//find a free params to fill aio_batch info
+	//params = pmem_buf->params_arr[plist->hashed_id];
+	ulint cur_free = pmem_buf->cur_free_param;
+	ulint arr_size = pmem_buf->param_arr_size;
 
-	params = pmem_buf->params_arr[plist->hashed_id];
+	/*Note that this thread've acquired flusher->mutex, so we don't need another mutex for param_array*/
+	pmemobj_rwlock_wrlock(pop, &pmem_buf->param_lock);
+	for (i = 0; i < arr_size; i++) {
+		if (pmem_buf->param_arrs[cur_free].is_free) {
+			params = pmem_buf->param_arrs[cur_free].params;
+			pmem_buf->param_arrs[cur_free].is_free = false; //we set this true in io_complete
+			plist->param_arr_index = cur_free;
+			pmem_buf->cur_free_param = (cur_free + 1) % arr_size;
+			break;
+		}
+		else {
+			cur_free = (cur_free + 1) % arr_size;
+		}
+	}
+
+	if (i == arr_size) {
+		//There is no free params to assign
+		printf("PMEM_ERROR: there is no free params to assign");
+		assert(0);
+	}
+	pmemobj_rwlock_unlock(pop, &pmem_buf->param_lock);
+	//params = pmem_buf->params_arr[plist->hashed_id];
 
 	n_params = 0;
 
