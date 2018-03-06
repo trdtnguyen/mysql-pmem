@@ -216,10 +216,13 @@ struct list_constr_args{
  It wrap buf_page_t and an address in pmem
  * */
 struct __pmem_buf_block_t{
-	PMEMrwlock					lock;
+	PMEMrwlock					lock; //this lock protects remain properties
+
 	page_id_t					id;
 	page_size_t					size;
-	int							check;
+	//pfs_os_file_t				file_handle;
+	char						file_name[256];
+	int							check; //PMEM AIO flag used in fil_aio_wait
 	bool	sync;
 	PMEM_BLOCK_STATE			state;
 	TOID(PMEM_BUF_BLOCK_LIST)	list;
@@ -276,6 +279,7 @@ struct __pmem_buf {
 	bool is_new;
 	TOID(PMEM_BUF_FREE_POOL) free_pool;
 	TOID_ARRAY(TOID(PMEM_BUF_BLOCK_LIST)) buckets;
+	TOID(PMEM_BUF_BLOCK_LIST) spec_list; //list of page 0 used in recovery
 
 	FILE* deb_file;
 #if defined(UNIV_PMEMOBJ_BUF_STAT)
@@ -285,6 +289,7 @@ struct __pmem_buf {
 	bool is_async_only; //true if we only capture non-sync write from buffer pool
 
 	//Those varables are in DRAM
+	bool is_recovery;
 	os_event_t*  flush_events; //N flush events for N buckets
 	os_event_t free_pool_event; //event for free_pool
 	
@@ -393,12 +398,21 @@ int
 pm_buf_block_init(PMEMobjpool *pop, void *ptr, void *arg);
 
 void 
-pm_buf_list_init(
+pm_buf_lists_init(
 		PMEMobjpool*	pop,
 		PMEM_BUF*		buf, 
 		const size_t	total_size,
 		const size_t	page_size);
 
+// allocate and init pages in a list
+void
+pm_buf_single_list_init(
+		PMEMobjpool*				pop,
+		TOID(PMEM_BUF_BLOCK_LIST)	inlist,
+		size_t&						offset,
+		struct list_constr_args*	args,
+		const size_t				n,
+		const size_t				page_size);
 int
 pm_buf_write(
 			PMEMobjpool*	pop,
@@ -453,12 +467,34 @@ pm_buf_read_lasted(
 		   	byte*				data,
 		   	bool sync);
 
+const PMEM_BUF_BLOCK*
+pm_buf_read_page_zero(
+			PMEMobjpool*		pop,
+		   	PMEM_BUF*			buf,
+			char*				file_name,
+		   	byte*				data);
+
 void
 pm_buf_flush_list(
 			PMEMobjpool*			pop,
 		   	PMEM_BUF*				buf,
 		   	PMEM_BUF_BLOCK_LIST*	plist);
+void
+pm_buf_resume_flushing(
+			PMEMobjpool*			pop,
+		   	PMEM_BUF*				buf);
 
+
+void
+pm_buf_handle_full_hashed_list(
+	PMEMobjpool*	pop,
+	PMEM_BUF*		buf,
+	ulint			hashed);
+
+void
+pm_buf_assign_flusher(
+	PMEM_BUF*				buf,
+	PMEM_BUF_BLOCK_LIST*	phashlist);
 
 void
 pm_buf_write_aio_complete(

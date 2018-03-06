@@ -1969,9 +1969,6 @@ innobase_start_or_create_for_mysql(void)
 		os_thread_sleep(10000);
 	}
 #if defined (UNIV_PMEMOBJ_BUF) 
-	//Declare the coordinator and worker flush threads for PMEM
-	//pm_list_cleaner_init();
-
 	os_thread_create(pm_buf_flush_list_cleaner_coordinator, NULL, NULL);
 #if defined (UNIV_PMEMOBJ_BUF_FLUSHER)
 	//os_thread_create(pm_flusher_coordinator, NULL, NULL);
@@ -2326,7 +2323,12 @@ files_checked:
 
 		/* We always try to do a recovery, even if the database had
 		been shut down normally: this is the normal startup path */
-
+#if defined (UNIV_PMEMOBJ_BUF_RECOVERY)
+		//printf("====> PMEM_INFO: start recovery from PMEM in background\n");
+		pm_buf_resume_flushing(gb_pmw->pop, gb_pmw->pbuf);
+		//gb_pmw->pbuf->is_recovery = true;
+		gb_pmw->pbuf->is_recovery = false;
+#endif
 		err = recv_recovery_from_checkpoint_start(flushed_lsn);
 
 		recv_sys->dblwr.pages.clear();
@@ -2386,6 +2388,11 @@ files_checked:
 		are initialized in trx_sys_init_at_db_start(). */
 
 		recv_recovery_from_checkpoint_finish();
+#if defined(UNIV_PMEMOBJ_BUF_RECOVERY) 
+		gb_pmw->pbuf->is_recovery = false;
+		//printf("====> PMEM_INFO: start recovery from PMEM in background\n");
+		//pm_buf_resume_flushing(gb_pmw->pop, gb_pmw->pbuf);
+#endif
 
 		/* Fix-up truncate of tables in the system tablespace
 		if server crashed while truncate was active. The non-

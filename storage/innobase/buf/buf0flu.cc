@@ -1087,47 +1087,27 @@ buf_flush_write_block_low(
 		break;
 	}
 #if defined(UNIV_PMEMOBJ_BUF)
-	// We capture the write from buffer pool flush
-	// EXCEPT: space 0
-	//if (bpage->id.page_no() != 0) {
-	//if(0) {
-
+	
+	//printf("\n [begin pm_buf_write space %zu page %zu==>", bpage->id.space(),bpage->id.page_no());
+//	if (!fsp_is_system_temporary(bpage->id.space())){	
 #if defined (UNIV_PMEMOBJ_BUF_V2)	
-	int ret = pm_buf_write_no_free_pool(gb_pmw->pop, gb_pmw->pbuf, bpage->id, bpage->size, frame, sync);
+		int ret = pm_buf_write_no_free_pool(gb_pmw->pop, gb_pmw->pbuf, bpage->id, bpage->size, frame, sync);
 #elif defined (UNIV_PMEMOBJ_BUF_FLUSHER)
-	int ret = pm_buf_write_with_flusher(gb_pmw->pop, gb_pmw->pbuf, bpage->id, bpage->size, frame, sync);
+		int ret = pm_buf_write_with_flusher(gb_pmw->pop, gb_pmw->pbuf, bpage->id, bpage->size, frame, sync);
 #elif defined (UNIV_PMEMOBJ_BUF_APPEND)
-	int ret = pm_buf_write_with_flusher_append(gb_pmw->pop, gb_pmw->pbuf, bpage->id, bpage->size, frame, sync);
+		int ret = pm_buf_write_with_flusher_append(gb_pmw->pop, gb_pmw->pbuf, bpage->id, bpage->size, frame, sync);
 #else
-	int ret = pm_buf_write(gb_pmw->pop, gb_pmw->pbuf, bpage->id, bpage->size, frame, sync);
+		int ret = pm_buf_write(gb_pmw->pop, gb_pmw->pbuf, bpage->id, bpage->size, frame, sync);
 #endif
-	assert(ret == PMEM_SUCCESS);
-	//we remove this page from LRU
-	//assert(buf_page_io_complete(bpage, true));
-	assert(buf_page_io_complete(bpage,sync));
-	goto skip_write_and_fsync;
-
-	//if (gb_pmw->pbuf->is_async_only) {
-	//	if(!sync) {
-	//		int ret = pm_buf_write(gb_pmw->pop, gb_pmw->pbuf, bpage->id, bpage->size, frame, false);
-	//		assert(ret == PMEM_SUCCESS);
-	//		//After memcpy, We need this call to sync the buffer pool variables	
-	//		assert(buf_page_io_complete(bpage));
-	//		//goto skip_write;
-	//		goto skip_write_and_fsync;
-	//	}
-	//}
-	//else {
-	//	//capture both sync and async write from buffer pool
-	//	int ret = pm_buf_write(gb_pmw->pop, gb_pmw->pbuf, bpage->id, bpage->size, frame, sync);
-	//	assert(ret == PMEM_SUCCESS);
-	//	//After memcpy, We need this call to sync the buffer pool variables	
-	//	if (!sync)
-	//		assert(buf_page_io_complete(bpage));
-	//	//goto skip_write;
-	//	goto skip_write_and_fsync;
-	//}
+		//printf("END  pm_buf_write space %zu page %zu]\n", bpage->id.space(),bpage->id.page_no());
+		//printf(" END pm_buf_write]");
+		assert(ret == PMEM_SUCCESS);
+		//we remove this page from LRU
+		//assert(buf_page_io_complete(bpage, true));
+		assert(buf_page_io_complete(bpage,sync));
+		goto skip_write_and_fsync;
 //	}
+	//skip_pm_write:
 #endif /*UNIV_PMEMOBJ_BUF*/
 	/* Disable use of double-write buffer for temporary tablespace.
 	Given the nature and load of temporary tablespace doublewrite buffer
@@ -1258,6 +1238,8 @@ buf_flush_page(
 		    && is_uncompressed
 		    && !rw_lock_sx_lock_nowait(rw_lock, BUF_IO_WRITE)) {
 
+		//tdnguyen test
+		//printf("\n [begin handle buf_dblwr ==> ");
 			if (!fsp_is_system_temporary(bpage->id.space())) {
 				/* avoiding deadlock possibility involves
 				doublewrite buffer, should flush it, because
@@ -1268,6 +1250,8 @@ buf_flush_page(
 			}
 
 			rw_lock_sx_lock_gen(rw_lock, BUF_IO_WRITE);
+		
+		//printf("end handle buf_dblwr] ");
 		}
 
 		/* If there is an observer that want to know if the asynchronous
@@ -1287,8 +1271,11 @@ buf_flush_page(
 		point, it is safe to access bpage, because it is io_fixed and
 		oldest_modification != 0.  Thus, it cannot be relocated in the
 		buffer pool or removed from flush_list or LRU_list. */
-
+		
+		//tdnguyen test
+		//printf("\n [begin buf_flush_write_block_low ==> ");
 		buf_flush_write_block_low(bpage, flush_type, sync);
+		//printf(" END buf_flush_write_block_low ] ");
 	}
 
 	return(flush);
@@ -2273,10 +2260,13 @@ buf_flush_single_page_from_LRU(
 
 			Note: There is no guarantee that this page has actually
 			been freed, only that it has been flushed to disk */
-
+			
+			//tdnguyen test
+			//printf("\n [begin buf_flush_page ==>");
 			freed = buf_flush_page(
 				buf_pool, bpage, BUF_FLUSH_SINGLE_PAGE, true);
 
+			//printf("END buf_flush_page ");
 			if (freed) {
 				break;
 			}
@@ -4076,8 +4066,9 @@ DECLARE_THREAD(pm_flusher_worker)(
 		//worker thread wait until there is is_requested signal 
 retry:
 		os_event_wait(flusher->is_req_not_empty);
-
-		//printf("wakeup worker...\n");	
+#if defined(UNIV_PMEMOBJ_BUF_RECOVERY_DEBUG)
+		printf("wakeup worker...\n");	
+#endif
 		//looking for a full list in wait-list and flush it
 		mutex_enter(&flusher->mutex);
 		if (flusher->n_requested > 0) {
@@ -4087,6 +4078,9 @@ retry:
 				if (plist)
 				{
 					//***this call aio_batch ***
+#if defined(UNIV_PMEMOBJ_BUF_RECOVERY_DEBUG)
+					printf("in flusher thread, pointer id=%zu, list_id =%zu\n", i, plist->list_id);
+#endif
 					pm_buf_flush_list(gb_pmw->pop, gb_pmw->pbuf, plist);
 					flusher->n_requested--;
 					os_event_set(flusher->is_req_full);
@@ -4159,6 +4153,7 @@ pm_handle_finished_block_with_flusher(
 		pflush_list->n_aio_pending--;
 
 	if (pflush_list->n_aio_pending + pflush_list->n_sio_pending == 0) {
+		//printf("\n [begin finish AIO list %zu\n", pflush_list->list_id);
 		//Now all pages in this list are persistent in disk
 		//(0) flush spaces
 		pm_buf_flush_spaces_in_list(pop, buf, pflush_list);
@@ -4214,7 +4209,8 @@ pm_handle_finished_block_with_flusher(
 		pfree_pool->cur_lists++;
 		//wakeup who is waitting for free_pool available
 		os_event_set(buf->free_pool_event);
-
+		
+		//printf("end finish AIO List %zu]", pflush_list->list_id);
 		pmemobj_rwlock_unlock(pop, &pfree_pool->lock);
 	}
 	//the list has some unfinished aio	
@@ -4269,12 +4265,14 @@ DECLARE_THREAD(pm_buf_flush_list_cleaner_coordinator)(
 		if (srv_shutdown_state != SRV_SHUTDOWN_NONE) {
 			break;
 		}
-		printf("cur free list = %zu\n", D_RW(gb_pmw->pbuf->free_pool)->cur_lists);
+		printf("cur free list = %zu, cur spec_list = %zu\n",
+			   	D_RW(gb_pmw->pbuf->free_pool)->cur_lists,
+				D_RW(gb_pmw->pbuf->spec_list)->cur_pages);
 
 #if defined(UNIV_PMEMOBJ_BUF_FLUSHER)
-		mutex_enter(&flusher->mutex);
-		printf(" n_requested/size %zu/%zu \n", flusher->n_requested, flusher->size);
-		mutex_exit(&flusher->mutex);
+		//mutex_enter(&flusher->mutex);
+		//printf(" n_requested/size %zu/%zu \n", flusher->n_requested, flusher->size);
+		//mutex_exit(&flusher->mutex);
 #endif
 	} //end while thread
 

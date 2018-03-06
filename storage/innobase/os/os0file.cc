@@ -1640,7 +1640,6 @@ AIO::release(Slot* slot)
 	if (   !slot->type.is_log() &&
 			slot->type.is_write()) {
 		ulint local_seg = (slot->pos * m_n_segments) / m_slots.size();
-
 		PMEM_SEG_WRAPPER* wrapper_arr = get_seg_wrapper();
 		PMEM_SEG_WRAPPER* wrapper = &wrapper_arr[local_seg];
 		++wrapper->io_finished;
@@ -1649,9 +1648,9 @@ AIO::release(Slot* slot)
 			wrapper->is_reserved = false;
 			--m_n_seg_reserved;
 #if defined (UNIV_PMEMOBJ_BUF_DEBUG)
-			printf("PMEM_DEBUG: complete wrapper %zu (handle list %zu) \n", wrapper->local_index, wrapper->list_id);
+			printf("PMEM_DEBUG: complete wrapper %zu (handle list %zu) m_n_seg_reserved %zu \n", wrapper->local_index, wrapper->list_id, m_n_seg_reserved);
 #endif
-			if (m_n_seg_reserved == m_n_segments - 1) {
+			if (m_n_seg_reserved <= m_n_segments - 1) {
 				os_event_set(m_seg_not_full);
 			}
 			if (m_n_seg_reserved == 0) {
@@ -7316,7 +7315,6 @@ AIO::pm_process_batch(
 	 * if n_params > slots_per_seg: need more segs to handle one batch_aio
 	 * */	
 	n_seg_need = (n_params + slots_per_seg - 1) / slots_per_seg;
-
 	//Wait in case current array is full
 	for (;;) {
 
@@ -7325,7 +7323,8 @@ AIO::pm_process_batch(
 		//if (m_n_reserved != m_slots.size()) {
 		//	break;
 		//}
-		if (m_n_seg_reserved + n_seg_need <= m_n_segments) {
+		//if (m_n_seg_reserved + n_seg_need <= m_n_segments) {}
+		if (m_n_seg_reserved + n_seg_need < m_n_segments) {
 			break;
 		}
 
@@ -7363,7 +7362,8 @@ start_submit:
 	}
 	//If there is a free lot in this array than there is at least one free segment 	
 	if (local_seg > m_n_segments){
-		printf("PMEM_ERROR: local_seg = %zu > m_n_segments = %zu, m_n_seg_reserved = %zu, m_n_reserved=%zu / %zu \n", local_seg, m_n_segments, m_n_seg_reserved, m_n_reserved, m_slots.size());
+		printf("PMEM_ERROR: n_params = %zu slots_per_seg = %zu n_seg_need = %zu local_seg = %zu > m_n_segments = %zu, m_n_seg_reserved = %zu, m_n_reserved/m_slots.size =%zu / %zu \n",
+				n_params,slots_per_seg,  n_seg_need, local_seg, m_n_segments, m_n_seg_reserved, m_n_reserved, m_slots.size());
 		assert(local_seg < m_n_segments);
 	}
 	

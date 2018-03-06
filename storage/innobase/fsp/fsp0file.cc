@@ -337,15 +337,19 @@ Datafile::read_first_page(bool read_only_mode)
 	while (page_size >= UNIV_PAGE_SIZE_MIN) {
 
 		ulint	n_read = 0;
-#if defined (UNIV_PMEMOBJ_BUF)
-		 //size_t read_bytes=  pm_buf_read(gb_pmw->pop, gb_pmw->pbuf,
-#if defined (UNIV_PMEMOBJ_BUF_APPEND)
-		 const PMEM_BUF_BLOCK* pblock =  pm_buf_read_lasted(gb_pmw->pop, gb_pmw->pbuf,
-				 page_id_t(0,0), page_size_t(UNIV_PAGE_SIZE, UNIV_PAGE_SIZE, false), m_first_page, true);
-#else
-		 const PMEM_BUF_BLOCK* pblock =  pm_buf_read(gb_pmw->pop, gb_pmw->pbuf,
-				 page_id_t(0,0), page_size_t(UNIV_PAGE_SIZE, UNIV_PAGE_SIZE, false), m_first_page, true);
-#endif
+// Testing this
+#if defined (UNIV_PMEMOBJ_BUF_RECOVERY)
+		//printf("===> PMEM_INFO read page 0 of file %s handle %d \n", m_filepath, m_handle.m_file);
+		 const PMEM_BUF_BLOCK* pblock =  pm_buf_read_page_zero(gb_pmw->pop, gb_pmw->pbuf,
+				 m_filepath, m_first_page);
+
+//#if defined (UNIV_PMEMOBJ_BUF_APPEND)
+//		 const PMEM_BUF_BLOCK* pblock =  pm_buf_read_lasted(gb_pmw->pop, gb_pmw->pbuf,
+//				 page_id_t(0,0), page_size_t(UNIV_PAGE_SIZE, UNIV_PAGE_SIZE, false), m_first_page, true);
+//#else
+//		 const PMEM_BUF_BLOCK* pblock =  pm_buf_read(gb_pmw->pop, gb_pmw->pbuf,
+//				 page_id_t(0,0), page_size_t(UNIV_PAGE_SIZE, UNIV_PAGE_SIZE, false), m_first_page, true);
+//#endif
 		 //if (read_bytes > 0) {
 		 if (pblock) {
 			 err = DB_SUCCESS;

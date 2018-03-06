@@ -5141,13 +5141,17 @@ buf_page_init_for_read(
 	} else {
 		ut_ad(mode == BUF_READ_ANY_PAGE);
 	}
-
 	if (page_size.is_compressed() && !unzip && !recv_recovery_is_on()) {
 		block = NULL;
 	} else {
+		//tdnguyen test
+		//printf ("\n[begin buf_LRU_get_free_block");
+
 		block = buf_LRU_get_free_block(buf_pool);
+		//printf ("  end  buf_LRU_get_free_block]");
 		ut_ad(block);
 		ut_ad(buf_pool_from_block(block) == buf_pool);
+
 	}
 
 	buf_pool_mutex_enter(buf_pool);
@@ -5169,7 +5173,6 @@ buf_page_init_for_read(
 		bpage = NULL;
 		goto func_exit;
 	}
-
 	if (block) {
 		bpage = &block->page;
 

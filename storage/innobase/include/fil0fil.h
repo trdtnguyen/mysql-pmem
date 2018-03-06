@@ -1240,6 +1240,11 @@ pm_buf_flush_spaces_in_list(
 		void* pop_in,
 	   	void* buf_in,
 	   	void* flush_list_in);
+
+//This function support to get the file handle from space
+fil_node_t* 
+pm_get_node_from_space(uint32_t space_no);
+
 #endif
 /**********************************************************************//**
 Waits for an aio operation to complete. This function is used to write the

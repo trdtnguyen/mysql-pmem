@@ -2659,6 +2659,8 @@ loop:
 	recv_sys->apply_batch_on = TRUE;
 
 	for (i = 0; i < hash_get_n_cells(recv_sys->addr_hash); i++) {
+		//tdnguyen test
+		//printf("i = %zu\n", i);
 
 		for (recv_addr = static_cast<recv_addr_t*>(
 				HASH_GET_FIRST(recv_sys->addr_hash, i));
@@ -2703,6 +2705,7 @@ loop:
 				mutex_exit(&(recv_sys->mutex));
 
 				if (buf_page_peek(page_id)) {
+					//tdnguyen test
 					buf_block_t*	block;
 
 					mtr_start(&mtr);
@@ -2717,7 +2720,13 @@ loop:
 					recv_recover_page(FALSE, block);
 					mtr_commit(&mtr);
 				} else {
+					//printf("i = %zu case 2: space_no %zu page_no %zu start...", i, page_id.space(), page_id.page_no());
+					//if (i == 9628) {
+					//	ulint test_break = 1;
+					//}
+					//printf("recv_read_in_area run space_no %zu page_no %zu...", page_id.space(), page_id.page_no());
 					recv_read_in_area(page_id);
+					//printf(" case2 ended \n");
 				}
 
 				mutex_enter(&(recv_sys->mutex));
@@ -4017,8 +4026,11 @@ recv_init_crash_recovery_spaces(void)
 			<< " was not found at '" << i->second.name
 			<< "', but there were no modifications either.";
 	}
-
+#if defined (UNIV_PMEMOBJ_BUF)
+	//We don't need the torn page correction process, skip this 
+#else //original
 	buf_dblwr_process();
+#endif
 
 	if (srv_force_recovery < SRV_FORCE_NO_LOG_REDO) {
 		/* Spawn the background thread to flush dirty pages

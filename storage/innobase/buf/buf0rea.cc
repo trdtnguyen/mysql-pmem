@@ -152,7 +152,11 @@ buf_read_page_low(
 	or is being dropped; if we succeed in initing the page in the buffer
 	pool for read, then DISCARD cannot proceed until the read has
 	completed */
+
+	//tdnguyen test
+	//printf("\n[ start buf_page_init_for_read");
 	bpage = buf_page_init_for_read(err, mode, page_id, page_size, unzip);
+	//printf(" end buf_page_init_for_read]");
 
 	if (bpage == NULL) {
 
@@ -167,7 +171,6 @@ buf_read_page_low(
 			      sync ? "sync" : "async"));
 
 	ut_ad(buf_page_in_file(bpage));
-
 	if (sync) {
 		thd_wait_begin(NULL, THD_WAIT_DISKIO);
 	}
@@ -194,31 +197,39 @@ buf_read_page_low(
 		}
 	);
 #if defined (UNIV_PMEMOBJ_BUF)
-	//size_t read_bytes=  pm_buf_read(gb_pmw->pop, gb_pmw->pbuf, page_id, page_size, (byte*)dst, sync);
+	//printf ("\n[start our func  ");
+	//printf("pm_buf_read space %zu page %zu start...", page_id.space(), page_id.page_no());
 #if defined (UNIV_PMEMOBJ_BUF_APPEND)
 	const PMEM_BUF_BLOCK* pblock=  pm_buf_read_lasted(gb_pmw->pop, gb_pmw->pbuf, page_id, page_size, (byte*)dst, sync);
 #else
 	const PMEM_BUF_BLOCK* pblock=  pm_buf_read(gb_pmw->pop, gb_pmw->pbuf, page_id, page_size, (byte*)dst, sync);
 #endif
+	//printf("end pm_buf_read_space, pblock is NULL  %d\n ", (pblock==NULL));
 	//if (read_bytes > 0) {
 	if (pblock) {
+		bool compl_ok;
 		if (sync) {
 			thd_wait_end(NULL);
 			/* The i/o is already completed when we arrive from
 			   fil_read */
-			if (!buf_page_io_complete(bpage)) {
-				ib::error() <<
+			//printf("start buf_page_io_complete sync=true ...");
+			compl_ok = buf_page_io_complete(bpage);
+			//printf("end buf_page_io_complete \n", sync);
+		}
+		else {
+			//printf("start buf_page_io_complete sync=FALSE ...");
+			compl_ok = buf_page_io_complete(bpage);
+			//printf("end buf_page_io_complete \n", sync);
+		}
+		if (!compl_ok) {
+			ib::error() <<
 				"!!!   PMEM_BUF ERROR buf_page_io_complete pblock->id=" << pblock->id 
 				<< ", pmemaddr=" << pblock->pmemaddr 
 				<< ", block_state= " << pblock->state
 				<< ", bpage->id= " << bpage->id 
 				<< ", page_id= " << page_id;
-				assert(0);
-				return(0);
-			}
-		}
-		else {
-			assert(buf_page_io_complete(bpage)) ;
+			assert(0);
+			return(0);
 		}
 	}
 	else {
@@ -265,6 +276,7 @@ buf_read_page_low(
 
 #if defined (UNIV_PMEMOBJ_BUF)
 	} //end else
+	//printf("end our func ]\n");
 #endif
 	return(1);
 }
@@ -947,11 +959,14 @@ buf_read_recv_pages(
 				BUF_READ_ANY_PAGE,
 				cur_page_id, page_size, true);
 		} else {
+			//tdnguyen test
+			//printf("\n[ call buf_read_page_low start cur_page_id = %zu  ...", cur_page_id.page_no());
 			buf_read_page_low(
 				&err, false,
 				IORequest::DO_NOT_WAKE,
 				BUF_READ_ANY_PAGE,
 				cur_page_id, page_size, true);
+			//printf("buf_read_page_low ended ]\n");
 		}
 	}
 

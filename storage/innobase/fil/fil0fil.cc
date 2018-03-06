@@ -778,10 +778,23 @@ retry:
 		ut_ad(page == page_align(page));
 
 		IORequest	request(IORequest::READ);
-
+#if defined (UNIV_PMEMOBJ_BUF_RECOVERY)
+		const PMEM_BUF_BLOCK* pblock =  pm_buf_read_page_zero(gb_pmw->pop, gb_pmw->pbuf,
+				node->name, page);
+		if (pblock != NULL) {
+			success = true;
+		}
+		else {
+			//Read from disk as the original
+			success = os_file_read(
+					request,
+					node->handle, page, 0, UNIV_PAGE_SIZE);
+		}
+#else //original
 		success = os_file_read(
 			request,
 			node->handle, page, 0, UNIV_PAGE_SIZE);
+#endif //UNIV_PMEMOBJ_BUF
 
 		space_id = fsp_header_get_space_id(page);
 		flags = fsp_header_get_flags(page);
@@ -1768,16 +1781,13 @@ fil_open_log_and_system_tablespace_files(void)
 	     space = UT_LIST_GET_NEXT(space_list, space)) {
 
 		fil_node_t*	node;
-
 		if (fil_space_belongs_in_lru(space)) {
-
 			continue;
 		}
-
+		
 		for (node = UT_LIST_GET_FIRST(space->chain);
 		     node != NULL;
 		     node = UT_LIST_GET_NEXT(chain, node)) {
-
 			if (!node->is_open) {
 				if (!fil_node_open_file(node)) {
 					/* This func is called during server's
@@ -5960,7 +5970,6 @@ pm_fil_io_batch(
 	//params = pmem_buf->params_arr[plist->hashed_id];
 
 	n_params = 0;
-
 	for (i = 0; i < plist->max_pages; ++i) {
 		pblock = D_RW(D_RW(plist->arr)[i]);
 
@@ -5970,8 +5979,14 @@ pm_fil_io_batch(
 		//if(is_lock_block)
 		//	pmemobj_rwlock_wrlock(pop, &pblock->lock);
 
-		if (pblock->state == PMEM_FREE_BLOCK ||
-				pblock->state == PMEM_IN_FLUSH_BLOCK) {
+		/*Note: If the server start from crash, blocks in list may have PMEM_IN_FLUSH_BLOCK status
+		 * Since a block in PMEM is the newest version, it's ok to re-flush it
+		 * Thus, we only skip PMEM_FREE_BLOCK block
+		 * */
+
+		//if (pblock->state == PMEM_FREE_BLOCK ||
+		//		pblock->state == PMEM_IN_FLUSH_BLOCK) {
+		if (pblock->state == PMEM_FREE_BLOCK) {
 			//printf("!!!!!PMEM_WARNING: in list %zu don't write a FREE BLOCK, skip to next block\n", plist->list_id);
 			continue;
 		}
@@ -5980,7 +5995,7 @@ pm_fil_io_batch(
 #if defined(UNIV_PMEMOBJ_BUF_DEBUG)
 		//	printf("PMEM_DEBUG: aio request page_id %zu space %zu pmemaddr %zu flush_list id=%zu\n", pblock->id.page_no(), pblock->id.space(), pblock->pmemaddr, plist->list_id);
 #endif
-		assert(pblock->state == PMEM_IN_USED_BLOCK);	
+		//assert(pblock->state == PMEM_IN_USED_BLOCK);	
 		pblock->state = PMEM_IN_FLUSH_BLOCK;	
 
 #if defined (UNIV_PMEMOBJ_BUF_DEBUG)
@@ -6005,6 +6020,30 @@ pm_fil_io_batch(
 
 		fil_mutex_enter_and_prepare_for_io(page_id.space());
 		fil_space_t*	space = fil_space_get_by_id(page_id.space());
+		if (space == NULL) {
+			printf("Space_id %zu is temp file %d\n",page_id.space(), fsp_is_system_temporary(page_id.space()));
+			printf("pm_fil_io_batch error, get space instance from space_no %zu page_no %zu file_name %s is NULL\n",
+				   	page_id.space(), page_id.page_no(), pblock->file_name);
+
+			//try to get by name
+			//space = fil_space_get_by_name(pblock->file_name);
+			//
+			mutex_exit(&fil_system->mutex);
+			//inside this function there is a mutex enter/exit 
+			fil_ibd_load(page_id.space(), pblock->file_name, space);
+
+			mutex_enter(&fil_system->mutex);
+
+			if (space == NULL) {
+				printf("=====> Ooops try to think more\n");
+				assert(0);
+			}
+			else {
+				printf("=======> Great!!!!\n");
+			}
+			//assert(0);
+		}
+
 		ulint		cur_page_no = page_id.page_no();
 		fil_node_t*	node = UT_LIST_GET_FIRST(space->chain);
 
@@ -6122,6 +6161,8 @@ pm_fil_io_batch(
 
 		//capture the aio request, this block replace os_aio() 
 		params[n_params].name = node->name;
+		//we also save the file name for recovery
+		strcpy(pblock->file_name, node->name);
 		params[n_params].file = node->handle;
 		params[n_params].buf = buf;
 		params[n_params].offset = offset;
@@ -6143,6 +6184,13 @@ pm_fil_io_batch(
 		assert(0);
 	}
 #endif 
+
+	if (n_params == 0) {
+		//this inform we are on a all-free-block list
+		printf("PMEM_INFO: logical error, we call flush a free list, list_id %zu cur_pages %zu max_pages %zu, is_flushing %d check again\n",
+				plist->list_id, plist->cur_pages, plist->max_pages, plist->is_flush);
+		assert(0);
+	}
 	//Now submit in batch
 	dberr_t	err;
 	/* Queue the aio request */
@@ -6156,6 +6204,22 @@ pm_fil_io_batch(
 	return DB_SUCCESS;
 
 }
+
+//This function support to get the file handle from space
+fil_node_t* 
+pm_get_node_from_space(uint32_t space_no) {
+
+		fil_space_t*	space;
+		fil_node_t*	node;
+
+		mutex_enter(&fil_system->mutex);
+		space = fil_space_get_by_id(space_no);
+		node = UT_LIST_GET_FIRST(space->chain);
+		mutex_exit(&fil_system->mutex);
+
+		return node;
+}
+
 #if defined (UNIV_PMEMOBJ_BUF_PARTITION)
 /*
  *Collect information about mapping a space to a hashed list and store in local heap
