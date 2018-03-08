@@ -2705,7 +2705,6 @@ loop:
 				mutex_exit(&(recv_sys->mutex));
 
 				if (buf_page_peek(page_id)) {
-					//tdnguyen test
 					buf_block_t*	block;
 
 					mtr_start(&mtr);
@@ -2720,13 +2719,7 @@ loop:
 					recv_recover_page(FALSE, block);
 					mtr_commit(&mtr);
 				} else {
-					//printf("i = %zu case 2: space_no %zu page_no %zu start...", i, page_id.space(), page_id.page_no());
-					//if (i == 9628) {
-					//	ulint test_break = 1;
-					//}
-					//printf("recv_read_in_area run space_no %zu page_no %zu...", page_id.space(), page_id.page_no());
 					recv_read_in_area(page_id);
-					//printf(" case2 ended \n");
 				}
 
 				mutex_enter(&(recv_sys->mutex));

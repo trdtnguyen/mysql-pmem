@@ -363,7 +363,8 @@ struct __pmem_buf_bucket_stat {
 	uint64_t		n_writes;/*number of writes on the bucket*/ 
 	uint64_t		n_overwrites;/*number of overwrites on the bucket*/
 	uint64_t		n_reads;/*number of reads on the list (both flushing and normal)*/	
-	uint64_t		n_reads_flushing;/*number of reads on the on-flushing list*/	
+	uint64_t		n_reads_hit;/*number of reads successful on PMEM buffer*/	
+	uint64_t		n_reads_flushing;/*number of reads on the on-flushing list, n_reads_flushing < n_reads_hit < n_reads*/	
 	uint64_t		max_linked_lists;
 	uint64_t		n_flushed_lists; /*number of of flushes on the bucket*/
 };

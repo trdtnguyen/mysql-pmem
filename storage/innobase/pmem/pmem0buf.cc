@@ -37,6 +37,8 @@ static uint64_t PMEM_N_FLUSH_THREADS;
 static uint64_t PMEM_N_BUCKET_BITS = 8;
 static uint64_t PMEM_N_SPACE_BITS = 5;
 static uint64_t PMEM_PAGE_PER_BUCKET_BITS=10;
+// 1 < this_value < flusher->size
+static uint64_t PMEM_FLUSHER_WAKE_THRESHOLD=5;
 
 static FILE* debug_file = fopen("part_debug.txt","w");
 
@@ -190,35 +192,35 @@ pm_wrapper_buf_alloc_or_open(
 	pmw->pbuf->cur_free_param = 0; //start with the 0
 	
 	//Open file 
-	pmw->pbuf->deb_file = fopen("part_debug.txt","w");
+	pmw->pbuf->deb_file = fopen("pmem_debug.txt","w");
 	
-	////test for recovery
-	printf("========== > Test for recovery\n");
-	TOID(PMEM_BUF_BLOCK_LIST) cur_list;
-	PMEM_BUF_BLOCK_LIST* pcurlist;
-
-	printf("The bucket ====\n");
-	for (i = 0; i < PMEM_N_BUCKETS; i++) {
-		TOID_ASSIGN(cur_list, (D_RW(pmw->pbuf->buckets)[i]).oid);
-		plist = D_RW(cur_list);
-		printf("list %zu is_flush %d cur_pages %zu max_pages %zu\n",plist->list_id, plist->is_flush, plist->cur_pages, plist->max_pages );
-		
-		TOID_ASSIGN(cur_list, (D_RW(cur_list)->next_list).oid);
-		printf("\t[next list \n");	
-		while( !TOID_IS_NULL(cur_list)) {
-			plist = D_RW(cur_list);
-			printf("\t\t next list %zu is_flush %d cur_pages %zu max_pages %zu\n",plist->list_id, plist->is_flush, plist->cur_pages, plist->max_pages );
-			TOID_ASSIGN(cur_list, (D_RW(cur_list)->next_list).oid);
-		}
-		printf("\t end next list] \n");	
-
-		//print the linked-list 
-
-	}
-	printf("The free pool ====\n");
-	PMEM_BUF_FREE_POOL* pfree_pool = D_RW(pmw->pbuf->free_pool);	
-	printf("cur_lists = %zu max_lists=%zu\n",
-			pfree_pool->cur_lists, pfree_pool->max_lists);
+//	////test for recovery
+//	printf("========== > Test for recovery\n");
+//	TOID(PMEM_BUF_BLOCK_LIST) cur_list;
+//	PMEM_BUF_BLOCK_LIST* pcurlist;
+//
+//	printf("The bucket ====\n");
+//	for (i = 0; i < PMEM_N_BUCKETS; i++) {
+//		TOID_ASSIGN(cur_list, (D_RW(pmw->pbuf->buckets)[i]).oid);
+//		plist = D_RW(cur_list);
+//		printf("list %zu is_flush %d cur_pages %zu max_pages %zu\n",plist->list_id, plist->is_flush, plist->cur_pages, plist->max_pages );
+//		
+//		TOID_ASSIGN(cur_list, (D_RW(cur_list)->next_list).oid);
+//		printf("\t[next list \n");	
+//		while( !TOID_IS_NULL(cur_list)) {
+//			plist = D_RW(cur_list);
+//			printf("\t\t next list %zu is_flush %d cur_pages %zu max_pages %zu\n",plist->list_id, plist->is_flush, plist->cur_pages, plist->max_pages );
+//			TOID_ASSIGN(cur_list, (D_RW(cur_list)->next_list).oid);
+//		}
+//		printf("\t end next list] \n");	
+//
+//		//print the linked-list 
+//
+//	}
+//	printf("The free pool ====\n");
+//	PMEM_BUF_FREE_POOL* pfree_pool = D_RW(pmw->pbuf->free_pool);	
+//	printf("cur_lists = %zu max_lists=%zu\n",
+//			pfree_pool->cur_lists, pfree_pool->max_lists);
 
 }
 
@@ -1238,9 +1240,10 @@ retry:
 			pm_buf_handle_full_hashed_list(pop, buf, hashed);
 			goto retry;
 		}
-
-		//printf("\n wait for list %zu cur_pages = %zu max_pages= %zu flushing....",
-		//phashlist->list_id, phashlist->cur_pages, phashlist->max_pages);
+#if defined (UNIV_PMEMOBJ_BUF_RECOVERY_DEBUG)
+		printf("\n wait for list %zu cur_pages = %zu max_pages= %zu flushing....",
+		phashlist->list_id, phashlist->cur_pages, phashlist->max_pages);
+#endif 
 		
 		pmemobj_rwlock_unlock(pop, &phashlist->lock);
 		os_event_wait(buf->flush_events[hashed]);
@@ -1360,6 +1363,10 @@ retry:
 		//block upcomming writes into this bucket
 		os_event_reset(buf->flush_events[hashed]);
 		
+#if defined (UNIV_PMEMOBJ_BUF_STAT)
+	++buf->bucket_stats[hashed].n_flushed_lists;
+#endif 
+
 		pmemobj_rwlock_unlock(pop, &phashlist->lock);
 		pm_buf_handle_full_hashed_list(pop, buf, hashed);
 
@@ -2034,6 +2041,11 @@ pm_buf_read(
 #endif
 
 	TOID_ASSIGN(cur_list, (D_RO(buf->buckets)[hashed]).oid);
+
+#if defined(UNIV_PMEMOBJ_BUF_STAT)
+	++buf->bucket_stats[hashed].n_reads;
+#endif
+
 	if ( TOID_IS_NULL(cur_list)) {
 		//assert(!TOID_IS_NULL(cur_list));
 		printf("PMEM_ERROR error in get hashded list, but return NULL, check again! \n");
@@ -2045,11 +2057,15 @@ pm_buf_read(
 	//pblock = NULL;
 	//found = -1;
 	
-	while ( !TOID_IS_NULL(cur_list) ) {
+	while ( !TOID_IS_NULL(cur_list) && (D_RO(cur_list) != NULL) ) {
 		//plist = D_RW(cur_list);
 		//pmemobj_rwlock_rdlock(pop, &plist->lock);
 		//Scan in this list
 		//for (i = 0; i < D_RO(cur_list)->max_pages; i++) {
+		if (D_RO(cur_list) == NULL) {
+			printf("===> ERROR read NULL list \n");
+			assert(0);
+		}
 		for (i = 0; i < D_RO(cur_list)->cur_pages; i++) {
 			//accepted states: PMEM_IN_USED_BLOCK, PMEM_IN_FLUSH_BLOCK
 			//if ( D_RO(D_RO(plist->arr)[i])->state != PMEM_FREE_BLOCK &&
@@ -2060,30 +2076,21 @@ pm_buf_read(
 				//if(is_lock_on_read)
 				pmemobj_rwlock_rdlock(pop, &pblock->lock);
 				
-				//if (!pblock->size.equals_to(size)) {
-				//	printf("PMEM_ERROR size not equal!!!\n");
-				//	assert(0);
-				//}
-				//found = i;
 				pdata = buf->p_align;
 
-				//UNIV_MEM_ASSERT_RW(data, pblock->size.physical());
-				//pmemobj_memcpy_persist(pop, data, pdata + pblock->pmemaddr, pblock->size.physical()); 
-				//memcpy(data, pdata + D_RO(D_RO(D_RO(cur_list)->arr)[i])->pmemaddr, D_RO(D_RO(D_RO(cur_list)->arr)[i])->size.physical()); 
 				memcpy(data, pdata + pblock->pmemaddr, pblock->size.physical()); 
 				//bytes_read = pblock->size.physical();
 #if defined (UNIV_PMEMOBJ_DEBUG)
 				assert( pm_check_io(pdata + pblock->pmemaddr, pblock->id) ) ;
 #endif
 #if defined(UNIV_PMEMOBJ_BUF_STAT)
-				++buf->bucket_stats[hashed].n_reads;
+				++buf->bucket_stats[hashed].n_reads_hit;
 				if (D_RO(cur_list)->is_flush)
 					++buf->bucket_stats[hashed].n_reads_flushing;
 #endif
 				//if(is_lock_on_read)
 				pmemobj_rwlock_unlock(pop, &pblock->lock);
 
-				//return bytes_read;
 				//return pblock;
 				return D_RO(D_RO(D_RO(cur_list)->arr)[i]);
 			}
@@ -2093,6 +2100,9 @@ pm_buf_read(
 		if ( TOID_IS_NULL(D_RO(cur_list)->next_list))
 			break;
 		TOID_ASSIGN(cur_list, (D_RO(cur_list)->next_list).oid);
+		if (TOID_IS_NULL(cur_list) || D_RO(cur_list) == NULL)
+			break;
+
 #if defined(UNIV_PMEMOBJ_BUF_STAT)
 		cur_level++;
 		if (buf->bucket_stats[hashed].max_linked_lists < cur_level)
@@ -2341,11 +2351,11 @@ pm_buf_handle_full_hashed_list(
 
 	/*(1) Handle flusher */
 #if defined (UNIV_PMEMOBJ_BUF_RECOVERY_DEBUG)
-	printf("\n[ begin handle assign flusher list %zu hashed %zu ===> ", phashlist->list_id, hashed);
+	printf("\n[(1) begin handle assign flusher list %zu hashed %zu ===> ", phashlist->list_id, hashed);
 #endif
 	pm_buf_assign_flusher(buf, phashlist);
 #if defined (UNIV_PMEMOBJ_BUF_RECOVERY_DEBUG)
-	printf("end handle assign flusher list %zu]\n", phashlist->list_id);
+	printf("(1) end handle assign flusher list %zu]\n", phashlist->list_id);
 #endif
 
 
@@ -2359,6 +2369,9 @@ pm_buf_handle_full_hashed_list(
 
 	/*    (2) Handle free list*/
 get_free_list:
+#if defined (UNIV_PMEMOBJ_BUF_RECOVERY_DEBUG)
+	printf("\n (2) begin get_free_list to replace full list %zu ==>", phashlist->list_id);
+#endif
 	//Get a free list from the free pool
 	pmemobj_rwlock_wrlock(pop, &(D_RW(buf->free_pool)->lock));
 
@@ -2393,6 +2406,9 @@ get_free_list:
 	TOID_ASSIGN( D_RW(first_list)->next_list, hash_list.oid);
 	TOID_ASSIGN( D_RW(hash_list)->prev_list, first_list.oid);
 
+#if defined (UNIV_PMEMOBJ_BUF_RECOVERY_DEBUG)
+	printf("\n (2) end get_free_list %zu to replace full list %zu ==>", D_RW(first_list)->list_id, phashlist->list_id);
+#endif
 
 #if defined (UNIV_PMEMOBJ_BUF_STAT)
 	if ( !TOID_IS_NULL( D_RW(hash_list)->next_list ))
@@ -2437,7 +2453,8 @@ assign_worker:
 			++flusher->n_requested;
 			//delay calling flush up to a threshold
 			//printf("trigger worker...\n");
-			if (flusher->n_requested == flusher->size - 2) {
+			//if (flusher->n_requested == flusher->size - 2) {
+			if (flusher->n_requested == PMEM_FLUSHER_WAKE_THRESHOLD) {
 				os_event_set(flusher->is_req_not_empty);
 			}
 
@@ -2508,7 +2525,7 @@ pm_filemap_init(
 #define PMEM_BUF_BUCKET_STAT_PRINT(pb, index) do {\
 	assert (0 <= index && index <= PMEM_N_BUCKETS);\
 	PMEM_BUCKET_STAT* p = &pb->bucket_stats[index];\
-	printf("bucket %d [n_writes %zu,\t n_overwrites %zu,\t n_reads %zu, n_reads_flushing %zu \tmax_linked_lists %zu, \tn_flushed_lists %zu] \n ",index,  p->n_writes, p->n_overwrites, p->n_reads, p->n_reads_flushing, p->max_linked_lists, p->n_flushed_lists); \
+	printf("bucket %zu [n_writes %zu,\t n_overwrites %zu,\t n_reads %zu, n_reads_hit %zu, n_reads_flushing %zu \tmax_linked_lists %zu, \tn_flushed_lists %zu] \n ",index,  p->n_writes, p->n_overwrites, p->n_reads, p->n_reads_hit, p->n_reads_flushing, p->max_linked_lists, p->n_flushed_lists); \
 }while (0)
 
 
@@ -2520,7 +2537,7 @@ void pm_buf_bucket_stat_init(PMEM_BUF* pbuf) {
 	
 	for (i = 0; i < PMEM_N_BUCKETS; i++) {
 		arr[i].n_writes = arr[i].n_overwrites = 
-			arr[i].n_reads = arr[i].n_reads_flushing = arr[i].max_linked_lists =
+			arr[i].n_reads = arr[i].n_reads_hit = arr[i].n_reads_flushing = arr[i].max_linked_lists =
 			arr[i].n_flushed_lists = 0;
 	}
 	pbuf->bucket_stats = arr;
@@ -2529,10 +2546,35 @@ void pm_buf_bucket_stat_init(PMEM_BUF* pbuf) {
 void pm_buf_stat_print_all(PMEM_BUF* pbuf) {
 	ulint i;
 	PMEM_BUCKET_STAT* arr = pbuf->bucket_stats;
+	PMEM_BUCKET_STAT sumstat;
+
+	sumstat.n_writes = sumstat.n_overwrites =
+		sumstat.n_reads = sumstat.n_reads_hit = sumstat.n_reads_flushing = sumstat.max_linked_lists = sumstat.n_flushed_lists = 0;
+
 
 	for (i = 0; i < PMEM_N_BUCKETS; i++) {
+		sumstat.n_writes += arr[i].n_writes;
+		sumstat.n_overwrites += arr[i].n_overwrites;
+		sumstat.n_reads += arr[i].n_reads;
+		sumstat.n_reads_hit += arr[i].n_reads_hit;
+		sumstat.n_reads_flushing += arr[i].n_reads_flushing;
+		sumstat.n_flushed_lists += arr[i].n_flushed_lists;
+
+		if (sumstat.max_linked_lists < arr[i].max_linked_lists) {
+			sumstat.max_linked_lists = arr[i].max_linked_lists;
+		}
+
 		PMEM_BUF_BUCKET_STAT_PRINT(pbuf, i);
 	}
+
+	printf("\n==========\n Statistic info:\n n_writes\t n_overwrites \t n_reads \t n_reads_hit \t n_reads_flushing \t max_linked_lists \t n_flushed_lists \n %zu \t %zu \t %zu \t %zu \t %zu \t %zu \t %zu \n",
+			sumstat.n_writes, sumstat.n_overwrites, sumstat.n_reads, sumstat.n_reads_hit, sumstat.n_reads_flushing, sumstat.max_linked_lists, sumstat.n_flushed_lists);
+	printf("\n==========\n");
+
+	fprintf(pbuf->deb_file, "\n==========\n Statistic info:\n n_writes\t n_overwrites \t n_reads \t n_reads_hit \t n_reads_flushing \t max_linked_lists \t n_flushed_lists \n %zu \t %zu \t %zu \t %zu \t %zu \t %zu \t %zu \n",
+			sumstat.n_writes, sumstat.n_overwrites, sumstat.n_reads, sumstat.n_reads_hit, sumstat.n_reads_flushing, sumstat.max_linked_lists, sumstat.n_flushed_lists);
+	fprintf(pbuf->deb_file, "\n==========\n");
+
 }
 
 #endif //UNIV_PMEMOBJ_STAT
