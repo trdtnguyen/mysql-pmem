@@ -4079,9 +4079,12 @@ retry:
 				{
 					//***this call aio_batch ***
 #if defined(UNIV_PMEMOBJ_BUF_RECOVERY_DEBUG)
-					printf("in flusher thread, pointer id=%zu, list_id =%zu\n", i, plist->list_id);
+					printf("\n [2] BEGIN (in flusher thread), pointer id=%zu, list_id =%zu\n", i, plist->list_id);
 #endif
 					pm_buf_flush_list(gb_pmw->pop, gb_pmw->pbuf, plist);
+#if defined(UNIV_PMEMOBJ_BUF_RECOVERY_DEBUG)
+					printf("\n [2] END (in flusher thread), pointer id=%zu, list_id =%zu\n", i, plist->list_id);
+#endif
 					flusher->n_requested--;
 					os_event_set(flusher->is_req_full);
 					//we can set the pointer to null after the pm_buf_flush_list finished
@@ -4143,6 +4146,10 @@ pm_handle_finished_block_with_flusher(
 	TOID_ASSIGN(flush_list, pblock->list.oid);
 	PMEM_BUF_BLOCK_LIST* pflush_list = D_RW(flush_list);
 
+	PMEM_BUF_BLOCK_LIST* pnext_list;
+	PMEM_BUF_BLOCK_LIST* pprev_list;
+
+
 	assert(pflush_list);
 		
 	pmemobj_rwlock_wrlock(pop, &pflush_list->lock);
@@ -4153,7 +4160,10 @@ pm_handle_finished_block_with_flusher(
 		pflush_list->n_aio_pending--;
 
 	if (pflush_list->n_aio_pending + pflush_list->n_sio_pending == 0) {
-		//printf("\n [begin finish AIO list %zu\n", pflush_list->list_id);
+#if defined (UNIV_PMEMOBJ_BUF_RECOVERY_DEBUG)
+		printf("\n [*****[4]  BEGIN finish AIO list %zu hashed_id %zu\n",
+		   	pflush_list->list_id, pflush_list->hashed_id);
+#endif
 		//Now all pages in this list are persistent in disk
 		//(0) flush spaces
 		pm_buf_flush_spaces_in_list(pop, buf, pflush_list);
@@ -4179,21 +4189,74 @@ pm_handle_finished_block_with_flusher(
 		
 		// (2) Remove this list from the doubled-linked list
 		//assert( !TOID_IS_NULL(pflush_list->prev_list) );
-		if( !TOID_IS_NULL(pflush_list->prev_list) ) {
-			//if (is_lock_prev_list)
-			//pmemobj_rwlock_wrlock(pop, &D_RW(pflush_list->prev_list)->lock);
-			TOID_ASSIGN( D_RW(pflush_list->prev_list)->next_list, pflush_list->next_list.oid);
-			//if (is_lock_prev_list)
-			//pmemobj_rwlock_unlock(pop, &D_RW(pflush_list->prev_list)->lock);
+		
+		pnext_list = D_RW(pflush_list->next_list);
+		pprev_list = D_RW(pflush_list->prev_list);
+
+		if (pprev_list != NULL &&
+			D_RW(pprev_list->next_list) != NULL &&
+			D_RW(pprev_list->next_list)->list_id == pflush_list->list_id){
+
+			if (pnext_list == NULL) {
+				TOID_ASSIGN(pprev_list->next_list, OID_NULL);
+			}
+			else {
+				TOID_ASSIGN(pprev_list->next_list, (pflush_list->next_list).oid);
+			}
 		}
 
-		if (!TOID_IS_NULL(pflush_list->next_list) ) {
-			//pmemobj_rwlock_wrlock(pop, &D_RW(pflush_list->next_list)->lock);
-
-			TOID_ASSIGN(D_RW(pflush_list->next_list)->prev_list, pflush_list->prev_list.oid);
-
-			//pmemobj_rwlock_unlock(pop, &D_RW(pflush_list->next_list)->lock);
+		if (pnext_list != NULL &&
+				D_RW(pnext_list->prev_list) != NULL &&
+				D_RW(pnext_list->prev_list)->list_id == pflush_list->list_id) {
+			if (pprev_list == NULL) {
+				TOID_ASSIGN(pnext_list->prev_list, OID_NULL);
+			}
+			else {
+			#if defined (UNIV_PMEMOBJ_BUF_RECOVERY_DEBUG)
+			printf("[4] !!!!! handle finish, cur_list_id %zu ",
+					pflush_list->list_id);
+			printf ("[4] !!!!  has next_list_id %zu ", pnext_list->list_id);
+			printf ("[4] !!!! has prev_list_id %zu \n", pprev_list->list_id);
+			#endif
+				TOID_ASSIGN(pnext_list->prev_list, (pflush_list->prev_list).oid);
+			}
 		}
+
+		//if( !TOID_IS_NULL(pflush_list->prev_list) &&
+		// D_RW(pflush_list->prev_list) != NULL &&
+		// D_RW(D_RW(pflush_list->prev_list)->next_list) != NULL  ) {
+		//	//if (is_lock_prev_list)
+		//	//pmemobj_rwlock_wrlock(pop, &D_RW(pflush_list->prev_list)->lock);
+		//	if (D_RW(pflush_list->next_list) == NULL) {
+		//		TOID_ASSIGN( D_RW(pflush_list->prev_list)->next_list, OID_NULL); 
+		//	}
+		//	else {
+		//		TOID_ASSIGN( D_RW(pflush_list->prev_list)->next_list, pflush_list->next_list.oid);
+		//	}
+		//	//if (is_lock_prev_list)
+		//	//pmemobj_rwlock_unlock(pop, &D_RW(pflush_list->prev_list)->lock);
+		//}
+
+//This case is rarely, can occur bug if happen
+		//if (!TOID_IS_NULL(pflush_list->next_list) &&
+		//  D_RW(pflush_list->next_list) != NULL && 
+		//  D_RW(D_RW(pflush_list->next_list)->prev_list) != NULL ) {
+		//	//pmemobj_rwlock_wrlock(pop, &D_RW(pflush_list->next_list)->lock);
+		//	if ( D_RW(pflush_list->prev_list) == NULL) {
+		//		TOID_ASSIGN( D_RW(pflush_list->next_list)->prev_list, OID_NULL);
+		//	}
+		//	else {
+		//	#if defined (UNIV_PMEMOBJ_BUF_RECOVERY_DEBUG)
+		//	printf("[4] !!!!! handle finish, cur_list_id %zu ",
+		//			pflush_list->list_id);
+		//	printf ("[4] !!!!  has next_list_id %zu ", D_RW(pflush_list->next_list)->list_id);
+		//	printf ("[4] !!!! has prev_list_id %zu \n", D_RW(pflush_list->prev_list)->list_id);
+		//	#endif
+		//		TOID_ASSIGN(D_RW(pflush_list->next_list)->prev_list, pflush_list->prev_list.oid);
+		//	}
+
+		//	//pmemobj_rwlock_unlock(pop, &D_RW(pflush_list->next_list)->lock);
+		//}
 		
 		TOID_ASSIGN(pflush_list->next_list, OID_NULL);
 		TOID_ASSIGN(pflush_list->prev_list, OID_NULL);
@@ -4202,7 +4265,6 @@ pm_handle_finished_block_with_flusher(
 		PMEM_BUF_FREE_POOL* pfree_pool;
 		pfree_pool = D_RW(buf->free_pool);
 
-		//printf("PMEM_DEBUG: in fil_aio_wait(), try to lock free_pool list id: %zd, cur_lists in free_pool= %zd \n", pflush_list->list_id, pfree_pool->cur_lists);
 		pmemobj_rwlock_wrlock(pop, &pfree_pool->lock);
 
 		POBJ_LIST_INSERT_TAIL(pop, &pfree_pool->head, flush_list, list_entries);
@@ -4210,7 +4272,9 @@ pm_handle_finished_block_with_flusher(
 		//wakeup who is waitting for free_pool available
 		os_event_set(buf->free_pool_event);
 		
-		//printf("end finish AIO List %zu]", pflush_list->list_id);
+#if defined (UNIV_PMEMOBJ_BUF_RECOVERY_DEBUG)
+		printf("\n *****[4] END finish AIO List %zu]\n", pflush_list->list_id);
+#endif
 		pmemobj_rwlock_unlock(pop, &pfree_pool->lock);
 	}
 	//the list has some unfinished aio	

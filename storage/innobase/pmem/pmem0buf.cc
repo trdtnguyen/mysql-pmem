@@ -38,44 +38,52 @@ static uint64_t PMEM_N_BUCKET_BITS = 8;
 static uint64_t PMEM_N_SPACE_BITS = 5;
 static uint64_t PMEM_PAGE_PER_BUCKET_BITS=10;
 // 1 < this_value < flusher->size
-static uint64_t PMEM_FLUSHER_WAKE_THRESHOLD=5;
+//static uint64_t PMEM_FLUSHER_WAKE_THRESHOLD=5;
+static uint64_t PMEM_FLUSHER_WAKE_THRESHOLD=2;
 
 static FILE* debug_file = fopen("part_debug.txt","w");
 
 /*
+ * This is the "clear" version of hash function, use it for debugging 
+ * For the production version, use the macro instead 
  * LESS_BUCKET partition
  * space_no and page_no are 32-bits value
  * the hashed value is B-bits value where B is the number of bits to present the number of buckets 
  * One space_no in a bucket has maximum N pages where log2(N) is page_per_bucket_bits
- * @space_no [in]: space number
- * @page_no	[in]: page number
- * @ n_buckets [in]: number of buckets
- * @ page_per_bucket_bits [in]: number of bits present the maximum number of pages each space in a hash list can have
+@hashed		[out]: return hashed value
+@space		[in]: space_no
+@page		[in]: page_no
+@n			[in]: number of buckets 
+@B			[in]: number of bits present number of buckets
+@S			[in]: number of bits present space_no
+@P			[in]: number of bits present max number of pages per space on a bucket, this value is log2(page_per_bucket)
  * 
  * */
 ulint 
 hash_f1(
+		ulint&			hashed,
 		uint32_t		space_no,
 	   	uint32_t		page_no,
-	   	uint64_t		n_buckets,
-		uint64_t		page_per_bucket_bits)
+	   	uint64_t		n,
+		uint64_t		B,	
+		uint64_t		S,
+		uint64_t		P)
 {	
-	ulint hashed;
 
-	uint32_t mask1 = 0xffffffff >> (32 - PMEM_N_SPACE_BITS);
+	uint32_t mask1 = 0xffffffff >> (32 - S);
 	uint32_t mask2 = 0xffffffff >> 
-		(32 - page_per_bucket_bits - (PMEM_N_BUCKET_BITS - PMEM_N_SPACE_BITS)) ;
+		(32 - P - (B - S)) ;
 
 	ulint p;
 	ulint s;
 
-	s = (space_no & mask1) << (PMEM_N_BUCKET_BITS - PMEM_N_SPACE_BITS);
-	p = (page_no & mask2) >> page_per_bucket_bits;
+	s = (space_no & mask1) << (B - S);
+	p = (page_no & mask2) >> P;
 
-	hashed = (p + s) % n_buckets;
+	hashed = (p + s) % n;
 
-	//printf("space %zu (0x%08x) page %zu (0x%08x)  p 0x%016x s 0x%016x hashed %zu (0x%016x) \n",
-	//		space_no, space_no, page_no, page_no, p, s, hashed, hashed);
+	printf("space %zu (0x%08x) page %zu (0x%08x)  p 0x%016x s 0x%016x hashed %zu (0x%016x) \n",
+			space_no, space_no, page_no, page_no, p, s, hashed, hashed);
 
 	return hashed;
 }
@@ -1241,8 +1249,8 @@ retry:
 			goto retry;
 		}
 #if defined (UNIV_PMEMOBJ_BUF_RECOVERY_DEBUG)
-		printf("\n wait for list %zu cur_pages = %zu max_pages= %zu flushing....",
-		phashlist->list_id, phashlist->cur_pages, phashlist->max_pages);
+//		printf("\n wait for list %zu hashed_id %zu cur_pages = %zu max_pages= %zu flushing....",
+//		phashlist->list_id, phashlist->hashed_id,  phashlist->cur_pages, phashlist->max_pages);
 #endif 
 		
 		pmemobj_rwlock_unlock(pop, &phashlist->lock);
@@ -1315,7 +1323,7 @@ retry:
 	pm_filemap_update_items(buf, page_id, hashed, PMEM_BUCKET_SIZE);
 	pmemobj_rwlock_unlock(pop, &buf->filemap->lock);
 #endif 
-	//This code is test for recovery, it has lock/unlock mutex
+	//This code is test for recovery, it has lock/unlock mutex. Note that we need the filename in pmem block because at recovery time, the space instance related with pmem_block may not load in the system. In that case, filename is used for ibd_load() func
 	//If the performance reduce, then remove it
 	fil_node_t*			node;
 
@@ -1368,7 +1376,13 @@ retry:
 #endif 
 
 		pmemobj_rwlock_unlock(pop, &phashlist->lock);
+#if defined(UNIV_PMEMOBJ_BUF_RECOVERY_DEBUG)
+		printf("\n[1] BEGIN pm_buf_handle_full list_id %zu, hashed_id %zu\n", phashlist->list_id, hashed);
+#endif 
 		pm_buf_handle_full_hashed_list(pop, buf, hashed);
+#if defined(UNIV_PMEMOBJ_BUF_RECOVERY_DEBUG)
+		printf("\n[1] END pm_buf_handle_full list_id %zu, hashed_id %zu\n", phashlist->list_id, hashed);
+#endif 
 
 		//unblock the upcomming writes on this bucket
 		os_event_set(buf->flush_events[hashed]);
@@ -1919,6 +1933,10 @@ pm_handle_finished_block_no_free_pool(
 	if (pflush_list->n_aio_pending + pflush_list->n_sio_pending == 0) {
 		//Now all pages in this list are persistent in disk
 		//(0) flush spaces
+#if defined(UNIV_PMEMOBJ_BUF_RECOVERY_DEBUG)
+		printf("finish list %zu hash_id %zu \n",
+				pflush_list->list_id, pflush_list->hashed_id);
+#endif
 		pm_buf_flush_spaces_in_list(pop, buf, pflush_list);
 
 		//(1) Reset blocks in the list
@@ -2351,11 +2369,11 @@ pm_buf_handle_full_hashed_list(
 
 	/*(1) Handle flusher */
 #if defined (UNIV_PMEMOBJ_BUF_RECOVERY_DEBUG)
-	printf("\n[(1) begin handle assign flusher list %zu hashed %zu ===> ", phashlist->list_id, hashed);
+	printf("\n[[1.1] BEGIN handle assign flusher list %zu hashed %zu ===> ", phashlist->list_id, hashed);
 #endif
 	pm_buf_assign_flusher(buf, phashlist);
 #if defined (UNIV_PMEMOBJ_BUF_RECOVERY_DEBUG)
-	printf("(1) end handle assign flusher list %zu]\n", phashlist->list_id);
+	printf("\n[1.1] END handle assign flusher list %zu]\n", phashlist->list_id);
 #endif
 
 
@@ -2370,7 +2388,7 @@ pm_buf_handle_full_hashed_list(
 	/*    (2) Handle free list*/
 get_free_list:
 #if defined (UNIV_PMEMOBJ_BUF_RECOVERY_DEBUG)
-	printf("\n (2) begin get_free_list to replace full list %zu ==>", phashlist->list_id);
+	printf("\n [1.2] BEGIN get_free_list to replace full list %zu ==>", phashlist->list_id);
 #endif
 	//Get a free list from the free pool
 	pmemobj_rwlock_wrlock(pop, &(D_RW(buf->free_pool)->lock));
@@ -2407,7 +2425,7 @@ get_free_list:
 	TOID_ASSIGN( D_RW(hash_list)->prev_list, first_list.oid);
 
 #if defined (UNIV_PMEMOBJ_BUF_RECOVERY_DEBUG)
-	printf("\n (2) end get_free_list %zu to replace full list %zu ==>", D_RW(first_list)->list_id, phashlist->list_id);
+	printf("\n [1.2] END get_free_list %zu to replace full list %zu, hashed %zu ==>", D_RW(first_list)->list_id, phashlist->list_id, hashed);
 #endif
 
 #if defined (UNIV_PMEMOBJ_BUF_STAT)
@@ -2429,10 +2447,9 @@ pm_buf_assign_flusher(
 assign_worker:
 	mutex_enter(&flusher->mutex);
 #if defined (UNIV_PMEMOBJ_BUF_RECOVERY_DEBUG)
-	printf ("pass mutex enter hash_id %zu list_id %zu==>", phashlist->hashed_id, phashlist->list_id);
+	//printf ("pass mutex enter hash_id %zu list_id %zu==>", phashlist->hashed_id, phashlist->list_id);
 #endif
 
-	//printf(" ==> pass the mutex enter ===> ");
 	if (flusher->n_requested == flusher->size) {
 		//all requested slot is full)
 		printf("PMEM_INFO: all reqs are booked, sleep and wait \n");
@@ -2473,7 +2490,7 @@ assign_worker:
 #endif
 	} //end while 
 #if defined (UNIV_PMEMOBJ_BUF_RECOVERY_DEBUG)
-	printf("pass while phashlist %zu flusher_tail = %zu flusher size = %zu n_requested %zu]\n", phashlist->list_id, flusher->tail, flusher->size, flusher->n_requested);
+	//printf("pass while phashlist %zu flusher_tail = %zu flusher size = %zu n_requested %zu]\n", phashlist->list_id, flusher->tail, flusher->size, flusher->n_requested);
 #endif
 	//check
 	if (n_try == 0) {

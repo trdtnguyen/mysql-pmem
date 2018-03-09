@@ -7308,7 +7308,9 @@ AIO::pm_process_batch(
 	//assert (n_params <= slots_per_seg);
 	assert(srv_use_native_aio);
 	assert(!request.is_encrypted() && !request.is_compressed());
-	
+#if defined (UNIV_PMEMOBJ_BUF_RECOVERY_DEBUG)
+	printf("\n [3] BEGIN pm_process_batch m_n_seg_reserved %zu \n", m_n_seg_reserved);
+#endif	
 	/*
 	 * if n_params < slots_per_seg: just need 1 seg to handle (waste, because write thread can handle more params)
 	 * if n_params == slots_per_seg: just need 1 seg to handle (OK)
@@ -7327,8 +7329,9 @@ AIO::pm_process_batch(
 		if (m_n_seg_reserved + n_seg_need < m_n_segments) {
 			break;
 		}
-
-		//printf("PMEM_INFO all segs are full, %zu/%zu, wait for a aio seg free...\n", m_n_seg_reserved, m_n_segments);
+#if defined (UNIV_PMEMOBJ_BUF_RECOVERY_DEBUG)
+		printf("\n [3] pm_process_batch all segs are full, %zu/%zu, wait for a aio seg free...\n", m_n_seg_reserved, m_n_segments);
+#endif
 
 		release();
 		//os_event_wait(m_not_full);
@@ -7372,6 +7375,9 @@ start_submit:
 	assert (wrapper->local_index == local_seg);
 	wrapper->io_pending = 0;
 	
+#if defined (UNIV_PMEMOBJ_BUF_RECOVERY_DEBUG)
+	printf("\n [3.1] BEGIN assign params from input param \n");
+#endif	
 	//this loop does assign parameters from input params to io_cb
 	for (i = count, slot_i = local_seg * slots_per_seg;
 		   	i < n_params && slot_i < m_slots.size();
@@ -7439,6 +7445,9 @@ start_submit:
 		//next param
 	} //end for
 
+#if defined (UNIV_PMEMOBJ_BUF_RECOVERY_DEBUG)
+	printf("\n [3.1] END assign params from input param \n");
+#endif	
 	//AIO Submit in batch 
 	io_ctx_index = local_seg;
 	int ret = io_submit(
@@ -7448,6 +7457,10 @@ start_submit:
 
 	//release();
 	
+#if defined (UNIV_PMEMOBJ_BUF_RECOVERY_DEBUG)
+	printf("\n [3] END pm_process_batch m_n_seg_reserved %zu \n", m_n_seg_reserved);
+#endif	
+
 	if (ret == wrapper->io_pending){
 		//return DB_SUCCESS;
 		count = i;

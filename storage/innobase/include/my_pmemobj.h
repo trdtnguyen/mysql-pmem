@@ -613,10 +613,13 @@ pm_buf_flush_list_cleaner_disabled_loop(void);
 
 ulint 
 hash_f1(
+		ulint&			hashed,
 		uint32_t		space_no,
 	   	uint32_t		page_no,
-	   	uint64_t		n_buckets,
-		uint64_t		page_per_bucket_bits);
+	   	uint64_t		n,
+		uint64_t		B,	
+		uint64_t		S,
+		uint64_t		P);
 
 #define PMEM_BUF_LIST_INSERT(pop, list, entries, type, func, args) do {\
 	POBJ_LIST_INSERT_NEW_HEAD(pop, &list.head, entries, sizeof(type), func, &args); \
@@ -640,6 +643,12 @@ hash_f1(
 @S			[in]: number of bits present space_no
 @P			[in]: number of bits present max number of pages per space on a bucket, this value is log2(page_per_bucket)
  * */
+//#define PMEM_LESS_BUCKET_HASH_KEY(hashed, space, page)\
+//   hash_f1(hashed, space, page,\
+//		   	PMEM_N_BUCKETS,\
+//		   	PMEM_N_BUCKET_BITS,\
+//		   	PMEM_N_SPACE_BITS,\
+//		   	PMEM_PAGE_PER_BUCKET_BITS) 
 #define PMEM_LESS_BUCKET_HASH_KEY(hashed, space, page)\
    	PARTITION_FUNC1(hashed, space, page,\
 		   	PMEM_N_BUCKETS,\

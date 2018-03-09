@@ -5945,7 +5945,10 @@ pm_fil_io_batch(
 	//params = pmem_buf->params_arr[plist->hashed_id];
 	ulint cur_free = pmem_buf->cur_free_param;
 	ulint arr_size = pmem_buf->param_arr_size;
-
+#if defined (UNIV_PMEMOBJ_BUF_RECOVERY_DEBUG)
+	printf("\n[2.1] BEGIN fill param info list_id %zu, hashed_id %zu ... \n",
+			plist->list_id, plist->hashed_id);
+#endif 
 	/*Note that this thread've acquired flusher->mutex, so we don't need another mutex for param_array*/
 	pmemobj_rwlock_wrlock(pop, &pmem_buf->param_lock);
 	for (i = 0; i < arr_size; i++) {
@@ -6194,7 +6197,15 @@ pm_fil_io_batch(
 	//Now submit in batch
 	dberr_t	err;
 	/* Queue the aio request */
+#if defined(UNIV_PMEMOBJ_BUF_RECOVERY_DEBUG)
+	printf("\n [2.2] BEGIN os_aio_batch, list_id %zu hashed_id %zu... \n",
+			plist->list_id, plist->hashed_id);
+#endif 
 	err = os_aio_batch(params, n_params);
+#if defined(UNIV_PMEMOBJ_BUF_RECOVERY_DEBUG)
+	printf("\n [2.2] END os_aio_batch, list_id %zu hashed_id %zu... \n",
+			plist->list_id, plist->hashed_id);
+#endif 
 
 	if (err != DB_SUCCESS){
 		printf("PMEM_ERROR: pm_fil_io_batch()list id %zu\n", plist->list_id );
