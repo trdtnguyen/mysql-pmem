@@ -3732,6 +3732,9 @@ innobase_init(
 	if (!srv_pmem_n_flush_threads) {
 		srv_pmem_n_flush_threads = 8;
 	}
+	if (!srv_pmem_flush_threshold) {
+		srv_pmem_flush_threshold = srv_pmem_n_flush_threads - 2;
+	}
 #endif 
 #if defined (UNIV_PMEMOBJ_BUF_PARTITION)
 	if (!srv_pmem_n_space_bits) {
@@ -19510,6 +19513,11 @@ static MYSQL_SYSVAR_ULONG(pmem_n_flush_threads, srv_pmem_n_flush_threads,
   "Number of threads in flusher, from 1 to 64, default is 8.",
   NULL, NULL, 8, 1, 64, 0);
 
+static MYSQL_SYSVAR_ULONG(pmem_flush_threshold, srv_pmem_flush_threshold,
+  PLUGIN_VAR_RQCMDARG | PLUGIN_VAR_READONLY,
+  "If the pointer assign in thread flusher larger than this threshold. The batch flush is trigger, from 1 to 64, default is number of flusher threads - 2.",
+  NULL, NULL, 6, 1, 64, 0);
+
 #endif
 
 #if defined (UNIV_PMEMOBJ_BUF_PARTITION)
@@ -20359,6 +20367,7 @@ static struct st_mysql_sys_var* innobase_system_variables[]= {
 #endif
 #if defined (UNIV_PMEMOBJ_BUF_FLUSHER)
   MYSQL_SYSVAR(pmem_n_flush_threads),
+  MYSQL_SYSVAR(pmem_flush_threshold),
 #endif 
 #if defined (UNIV_PMEMOBJ_BUF_PARTITION)
   MYSQL_SYSVAR(pmem_n_space_bits),

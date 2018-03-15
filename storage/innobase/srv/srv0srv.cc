@@ -209,6 +209,7 @@ ulong	srv_pmem_buf_bucket_size	= 256;
 #endif 
 #if defined(UNIV_PMEMOBJ_BUF_FLUSHER)
 ulong	srv_pmem_n_flush_threads	= 8;
+ulong	srv_pmem_flush_threshold	= 6;
 #endif
 #if defined (UNIV_PMEMOBJ_BUF_PARTITION)
 ulong	srv_pmem_n_space_bits	= 5;

@@ -643,12 +643,15 @@ hash_f1(
 @S			[in]: number of bits present space_no
 @P			[in]: number of bits present max number of pages per space on a bucket, this value is log2(page_per_bucket)
  * */
+//Use this funciton for DEBUG only
 //#define PMEM_LESS_BUCKET_HASH_KEY(hashed, space, page)\
 //   hash_f1(hashed, space, page,\
 //		   	PMEM_N_BUCKETS,\
 //		   	PMEM_N_BUCKET_BITS,\
 //		   	PMEM_N_SPACE_BITS,\
 //		   	PMEM_PAGE_PER_BUCKET_BITS) 
+
+//Use this macro for production build 
 #define PMEM_LESS_BUCKET_HASH_KEY(hashed, space, page)\
    	PARTITION_FUNC1(hashed, space, page,\
 		   	PMEM_N_BUCKETS,\

@@ -276,6 +276,7 @@ extern ulong	srv_pmem_buf_bucket_size;
 #endif
 #if defined(UNIV_PMEMOBJ_BUF_FLUSHER)
 extern ulong	srv_pmem_n_flush_threads;
+extern ulong	srv_pmem_flush_threshold;
 #endif
 #if defined (UNIV_PMEMOBJ_BUF_PARTITION)
 extern ulong	srv_pmem_n_space_bits;

@@ -32,16 +32,18 @@ static uint64_t PMEM_N_FLUSH_THREADS;
 //set this to large number to eliminate 
 //static uint64_t PMEM_PAGE_PER_BUCKET_BITS=32;
 
+// 1 < this_value < flusher->size (32)
+//static uint64_t PMEM_FLUSHER_WAKE_THRESHOLD=5;
+static uint64_t PMEM_FLUSHER_WAKE_THRESHOLD=30;
+
+static FILE* debug_file = fopen("part_debug.txt","a");
+
 #if defined (UNIV_PMEMOBJ_BUF_PARTITION)
 //256 buckets => 8 bits, max 32 spaces => 5 bits => need 3 = 8 - 5 bits
 static uint64_t PMEM_N_BUCKET_BITS = 8;
 static uint64_t PMEM_N_SPACE_BITS = 5;
 static uint64_t PMEM_PAGE_PER_BUCKET_BITS=10;
-// 1 < this_value < flusher->size
-//static uint64_t PMEM_FLUSHER_WAKE_THRESHOLD=5;
-static uint64_t PMEM_FLUSHER_WAKE_THRESHOLD=2;
 
-static FILE* debug_file = fopen("part_debug.txt","w");
 
 /*
  * This is the "clear" version of hash function, use it for debugging 
@@ -111,6 +113,7 @@ pm_wrapper_buf_alloc_or_open(
 	PMEM_BUF_FLUSH_PCT = srv_pmem_buf_flush_pct;
 #if defined (UNIV_PMEMOBJ_BUF_FLUSHER)
 	PMEM_N_FLUSH_THREADS= srv_pmem_n_flush_threads;
+	PMEM_FLUSHER_WAKE_THRESHOLD = srv_pmem_flush_threshold;
 #endif
 
 #if defined (UNIV_PMEMOBJ_BUF_PARTITION)
@@ -200,7 +203,7 @@ pm_wrapper_buf_alloc_or_open(
 	pmw->pbuf->cur_free_param = 0; //start with the 0
 	
 	//Open file 
-	pmw->pbuf->deb_file = fopen("pmem_debug.txt","w");
+	pmw->pbuf->deb_file = fopen("pmem_debug.txt","a");
 	
 //	////test for recovery
 //	printf("========== > Test for recovery\n");
@@ -2310,7 +2313,7 @@ pm_buf_resume_flushing(
 
 	for (i = 0; i < PMEM_N_BUCKETS; i++) {
 #if defined (UNIV_PMEMOBJ_BUF_RECOVERY_DEBUG)
-		printf ("\n====>resuming flush hash %zu\n", i);
+		//printf ("\n====>resuming flush hash %zu\n", i);
 #endif
 		TOID_ASSIGN(cur_list, (D_RW(buf->buckets)[i]).oid);
 		phashlist = D_RW(cur_list);
@@ -2471,7 +2474,12 @@ assign_worker:
 			//delay calling flush up to a threshold
 			//printf("trigger worker...\n");
 			//if (flusher->n_requested == flusher->size - 2) {
-			if (flusher->n_requested == PMEM_FLUSHER_WAKE_THRESHOLD) {
+			//if (flusher->n_requested == PMEM_FLUSHER_WAKE_THRESHOLD) {
+			if (flusher->n_requested >= PMEM_FLUSHER_WAKE_THRESHOLD) {
+#if defined (UNIV_PMEMOBJ_BUF_RECOVERY_DEBUG)
+			printf("\n in [1.1] try to trigger flusher list_id = %zu\n", phashlist->list_id);
+#endif
+			
 				os_event_set(flusher->is_req_not_empty);
 			}
 
@@ -2560,6 +2568,9 @@ void pm_buf_bucket_stat_init(PMEM_BUF* pbuf) {
 	pbuf->bucket_stats = arr;
 }
 
+/*
+ *Print statistic infomation for all hashed lists
+ * */
 void pm_buf_stat_print_all(PMEM_BUF* pbuf) {
 	ulint i;
 	PMEM_BUCKET_STAT* arr = pbuf->bucket_stats;
@@ -2589,6 +2600,10 @@ void pm_buf_stat_print_all(PMEM_BUF* pbuf) {
 	printf("\n==========\n");
 
 	fprintf(pbuf->deb_file, "\n==========\n Statistic info:\n n_writes\t n_overwrites \t n_reads \t n_reads_hit \t n_reads_flushing \t max_linked_lists \t n_flushed_lists \n %zu \t %zu \t %zu \t %zu \t %zu \t %zu \t %zu \n",
+			sumstat.n_writes, sumstat.n_overwrites, sumstat.n_reads, sumstat.n_reads_hit, sumstat.n_reads_flushing, sumstat.max_linked_lists, sumstat.n_flushed_lists);
+	fprintf(pbuf->deb_file, "\n==========\n");
+
+	fprintf(debug_file, "\n==========\n Statistic info:\n n_writes n_overwrites n_reads n_reads_hit n_reads_flushing max_linked_lists n_flushed_lists \n %zu %zu %zu %zu %zu %zu %zu \n",
 			sumstat.n_writes, sumstat.n_overwrites, sumstat.n_reads, sumstat.n_reads_hit, sumstat.n_reads_flushing, sumstat.max_linked_lists, sumstat.n_flushed_lists);
 	fprintf(pbuf->deb_file, "\n==========\n");
 

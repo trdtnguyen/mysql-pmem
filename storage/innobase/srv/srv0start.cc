@@ -172,6 +172,11 @@ enum srv_shutdown_t	srv_shutdown_state = SRV_SHUTDOWN_NONE;
 
 /** Files comprising the system tablespace */
 static pfs_os_file_t	files[1000];
+
+#if defined (UNIV_TRACE_FLUSH_TIME)
+ulint gb_flush_time = 0;
+FILE* gb_trace_file = fopen("trace_flush.txt","a");
+#endif 
 #ifdef UNIV_NVM_LOG
 //tdnguyen
 /** global PMEM_FILE_COLL object*/
@@ -1775,6 +1780,7 @@ innobase_start_or_create_for_mysql(void)
 	    "; n_buckets=" << srv_pmem_buf_n_buckets <<
 	#ifdef UNIV_PMEMOBJ_BUF_FLUSHER
 	    "; n_flush_threads=" << srv_pmem_n_flush_threads <<
+	    "; flush_threshold=" << srv_pmem_flush_threshold <<
 	#endif
 	    "; n_slots_per_seg=" << srv_aio_n_slots_per_seg <<
 	    "; flush_pct=" << srv_pmem_buf_flush_pct <<
@@ -1972,8 +1978,9 @@ innobase_start_or_create_for_mysql(void)
 	os_thread_create(pm_buf_flush_list_cleaner_coordinator, NULL, NULL);
 #if defined (UNIV_PMEMOBJ_BUF_FLUSHER)
 	//os_thread_create(pm_flusher_coordinator, NULL, NULL);
-	//printf("PMEM_INFO: ========>   create %d worker threads for pm\n", PMEM_N_BUCKETS);
-	for (i = 1; i < srv_n_page_cleaners; ++i) {
+	printf("PMEM_INFO: ========>   create %d worker threads for pm\n", srv_pmem_n_flush_threads);
+	//for (i = 1; i < srv_n_page_cleaners; ++i) {
+	for (i = 0; i < srv_pmem_n_flush_threads; ++i) {
 		os_thread_create(pm_flusher_worker, NULL, NULL);
 	}
 #endif 
@@ -2861,6 +2868,11 @@ innobase_shutdown_for_mysql(void)
 #endif
 	pm_wrapper_free(gb_pmw);
 #endif
+#if defined (UNIV_TRACE_FLUSH_TIME)
+	printf("=== > TRACE FLUSH TIME: total flush time (ms) = %zu\n ", gb_flush_time);
+	fprintf(gb_trace_file, "\n===>TRACE_FLUSH_TIME: total flush time (ms) = %zu", gb_flush_time);
+	fclose(gb_trace_file);
+#endif 
 
 	/* 2. Make all threads created by InnoDB to exit */
 	srv_shutdown_all_bg_threads();

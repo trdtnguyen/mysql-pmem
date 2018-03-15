@@ -61,6 +61,9 @@ Created 11/11/1995 Heikki Tuuri
 static const int buf_flush_page_cleaner_priority = -20;
 #endif /* UNIV_LINUX */
 
+#if defined(UNIV_TRACE_FLUSH_TIME)
+extern ulint gb_flush_time;
+#endif
 #if defined(UNIV_PMEMOBJ_BUF)
 #include "my_pmemobj.h"
 #include <libpmemobj.h>
@@ -1187,6 +1190,12 @@ buf_flush_page(
 
 	bool	is_uncompressed;
 
+#if defined(UNIV_TRACE_FLUSH_TIME)
+	ulint start_time;
+	ulint end_time;
+
+	start_time = ut_time_ms();
+#endif
 	is_uncompressed = (buf_page_get_state(bpage) == BUF_BLOCK_FILE_PAGE);
 	ut_ad(is_uncompressed == (block_mutex != &buf_pool->zip_mutex));
 
@@ -1277,6 +1286,11 @@ buf_flush_page(
 		buf_flush_write_block_low(bpage, flush_type, sync);
 		//printf(" END buf_flush_write_block_low ] ");
 	}
+
+#if defined(UNIV_TRACE_FLUSH_TIME)
+	end_time = ut_time_ms();
+    gb_flush_time += (end_time - start_time);
+#endif 
 
 	return(flush);
 }
@@ -4109,7 +4123,7 @@ retry:
 
 	mutex_enter(&flusher->mutex);
 	flusher->n_workers--;
-	printf("close a worker, current open workers %zu, n_requested/size = %zu/%zu/%zu is_running = %d\n", flusher->n_workers, flusher->n_requested, flusher->size, flusher->is_running);
+	//printf("close a worker, current open workers %zu, n_requested/size = %zu/%zu/%zu is_running = %d\n", flusher->n_workers, flusher->n_requested, flusher->size, flusher->is_running);
 	if (flusher->n_workers == 0) {
 		printf("The last worker is closing\n");
 		//os_event_set(flusher->is_all_closed);
