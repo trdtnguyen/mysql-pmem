@@ -2868,11 +2868,25 @@ innobase_shutdown_for_mysql(void)
 #endif
 	pm_wrapper_free(gb_pmw);
 #endif
+
 #if defined (UNIV_TRACE_FLUSH_TIME)
 	printf("=== > TRACE FLUSH TIME: total flush time (ms) = %zu\n ", gb_flush_time);
-	fprintf(gb_trace_file, "\n===>TRACE_FLUSH_TIME: total flush time (ms) = %zu", gb_flush_time);
+//Add the method name in the trace out
+#if defined (UNIV_PMEMOBJ_DBW)
+	fprintf(gb_trace_file, "\n===>TRACE_FLUSH_TIME_DBW: total flush time (ms) = %zu", gb_flush_time);
+#elif defined (UNIV_PMEMOBJ_BUF) && defined (UNIV_PMEMOBJ_WAL)
+	fprintf(gb_trace_file, "\n===>TRACE_FLUSH_TIME_WAL_LESS: total flush time (ms) = %zu", gb_flush_time);
+#elif defined (UNIV_PMEMOBJ_BUF) && defined (UNIV_PMEMOBJ_BUF_PARTITION)
+	fprintf(gb_trace_file, "\n===>TRACE_FLUSH_TIME_PARTITION: total flush time (ms) = %zu", gb_flush_time);
+#elif defined (UNIV_PMEMOBJ_BUF)
+	fprintf(gb_trace_file, "\n===>TRACE_FLUSH_TIME_EVEN: total flush time (ms) = %zu", gb_flush_time);
+#elif defined (UNIV_PMEMOBJ_WAL)
+	fprintf(gb_trace_file, "\n===>TRACE_FLUSH_TIME_WAL: total flush time (ms) = %zu", gb_flush_time);
+#else
+	fprintf(gb_trace_file, "\n===>TRACE_FLUSH_TIME_ORI: total flush time (ms) = %zu", gb_flush_time);
+#endif //defined (UNIV_PMEMOBJ_DBW)
 	fclose(gb_trace_file);
-#endif 
+#endif  //defined (UNIV_TRACE_FLUSH_TIME)
 
 	/* 2. Make all threads created by InnoDB to exit */
 	srv_shutdown_all_bg_threads();
