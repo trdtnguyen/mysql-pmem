@@ -79,6 +79,20 @@ typedef struct __pmem_file_map PMEM_FILE_MAP;
 
 struct __pmem_sort_obj;
 typedef struct __pmem_sort_obj PMEM_SORT_OBJ;
+#if defined(UNIV_PMEMOBJ_LSB)
+struct __pmem_LSB;
+typedef struct __pmem_LSB PMEM_LSB;
+
+
+struct __pmem_lsb_hash_entry_t;
+typedef struct __pmem_lsb_hash_entry_t PMEM_LSB_HASH_ENTRY;
+
+struct __pmem_lsb_hash_bucket_t;
+typedef struct __pmem_lsb_hash_bucket_t PMEM_LSB_HASH_BUCKET;
+
+struct __pmem_lsb_hashtable_t;
+typedef struct __pmem_lsb_hashtable_t PMEM_LSB_HASHTABLE;
+#endif
 
 #endif //UNIV_PMEMOBJ_BUF
 
@@ -86,6 +100,7 @@ POBJ_LAYOUT_BEGIN(my_pmemobj);
 POBJ_LAYOUT_TOID(my_pmemobj, char);
 POBJ_LAYOUT_TOID(my_pmemobj, PMEM_LOG_BUF);
 POBJ_LAYOUT_TOID(my_pmemobj, PMEM_DBW);
+
 #if defined(UNIV_PMEMOBJ_BUF)
 POBJ_LAYOUT_TOID(my_pmemobj, PMEM_BUF);
 POBJ_LAYOUT_TOID(my_pmemobj, PMEM_BUF_FREE_POOL);
@@ -93,7 +108,11 @@ POBJ_LAYOUT_TOID(my_pmemobj, PMEM_BUF_BLOCK_LIST);
 POBJ_LAYOUT_TOID(my_pmemobj, TOID(PMEM_BUF_BLOCK_LIST));
 POBJ_LAYOUT_TOID(my_pmemobj, PMEM_BUF_BLOCK);
 POBJ_LAYOUT_TOID(my_pmemobj, TOID(PMEM_BUF_BLOCK));
-#endif //UNIV_PMEMOBJ_BUF
+#if defined(UNIV_PMEMOBJ_LSB)
+POBJ_LAYOUT_TOID(my_pmemobj, PMEM_LSB);
+POBJ_LAYOUT_TOID(my_pmemobj, PMEM_LSB_HASHTABLE);
+#endif
+#endif //UNIV_PMEMOBJ_LSB
 POBJ_LAYOUT_END(my_pmemobj);
 
 
@@ -106,6 +125,10 @@ struct __pmem_wrapper {
 	PMEM_DBW* pdbw;
 #if defined (UNIV_PMEMOBJ_BUF)
 	PMEM_BUF* pbuf;
+#endif
+
+#if defined (UNIV_PMEMOBJ_LSB)
+	PMEM_LSB* plsb;
 #endif
 	bool is_new;
 };
@@ -304,7 +327,6 @@ struct __pmem_buf {
 	PMEM_FILE_MAP* filemap;
 };
 
-
 // PARTITION //////////////
 /*Map space id to hashed_id, for partition purpose
  * */
@@ -373,6 +395,7 @@ struct __pmem_buf_bucket_stat {
 
 bool pm_check_io(byte* frame, page_id_t  page_id);
 
+
 void
 pm_wrapper_buf_alloc_or_open(
 		 PMEM_WRAPPER*		pmw,
@@ -394,6 +417,7 @@ pm_pop_buf_alloc(
 		 PMEMobjpool*		pop,
 		 const size_t		size,
 		 const size_t		page_size);
+
 
 int 
 pm_buf_block_init(PMEMobjpool *pop, void *ptr, void *arg);
@@ -505,6 +529,154 @@ pm_buf_write_aio_complete(
 
 PMEM_BUF* pm_pop_get_buf(PMEMobjpool* pop);
 
+
+////////////////////// LSB ///////////////////////
+#if defined (UNIV_PMEMOBJ_LSB)
+//LSB: Implement Log-structure Buffer
+struct __pmem_lsb_hash_entry_t{
+	page_id_t					id;
+	size_t						size;
+	char						file_name[256];
+	uint64_t		pmemaddr; /*
+						  the offset of the page in pmem
+						  note that the size of page can be got from page
+						*/
+	int				lsb_entry_id; //id of the entry in lsb list
+	__pmem_lsb_hash_entry_t* prev;
+	__pmem_lsb_hash_entry_t* next;
+
+};
+struct __pmem_lsb_hash_bucket_t{
+	__pmem_lsb_hash_entry_t* head;
+	__pmem_lsb_hash_entry_t* tail;
+	size_t n_entries;
+	ulint param_arr_index; //index of param entry, used when transfer data from the bucket to the io_submit()
+};
+struct __pmem_lsb_hashtable_t{
+	__pmem_lsb_hash_bucket_t* buckets;
+	size_t n_buckets;
+};
+
+//The wrapper LSB
+struct __pmem_LSB {
+	//centralized mutex lock for whole buffer
+	PMEMrwlock				lsb_lock;
+
+	os_event_t			all_aio_finished;
+
+	size_t size;
+	size_t page_size;
+	PMEM_OBJ_TYPES type;	
+
+	PMEMoid  data; //pmem data
+	//char* p_align; //align 
+	byte* p_align; //align 
+
+	bool is_new;
+	TOID(PMEM_LSB_HASHTABLE) ht;
+	TOID(PMEM_BUF_BLOCK_LIST) lsb_list; //list of page 0 used in recovery
+
+	ulint n_aio_completed;
+
+	FILE* deb_file;
+
+	//Those varables are in DRAM
+	bool is_recovery;
+	os_event_t*  flush_events; //N flush events for N buckets
+	PMEMrwlock				param_lock;
+	PMEM_AIO_PARAM_ARRAY* param_arrs;//circular array of pointers
+	ulint			param_arr_size; //size of the array
+	ulint			cur_free_param; //circular index, where the next free params is
+
+	PMEM_FLUSHER* flusher;	
+};
+
+void
+pm_wrapper_lsb_alloc_or_open(
+		PMEM_WRAPPER*		pmw,
+		const size_t		buf_size,
+		const size_t		page_size);
+
+void pm_wrapper_lsb_close(PMEM_WRAPPER* pmw);
+
+int
+pm_wrapper_lsb_alloc(
+		PMEM_WRAPPER*		pmw,
+	    const size_t		size,
+		const size_t		page_size);
+
+PMEM_LSB* 
+pm_pop_lsb_alloc(
+		PMEMobjpool*		pop,
+		const size_t		size,
+		const size_t		page_size);
+void 
+pm_lsb_lists_init(
+		PMEMobjpool*	pop,
+		PMEM_LSB*		lsb, 
+		const size_t	total_size,
+	   	const size_t	page_size);
+void 
+pm_lsb_hashtable_init(
+		PMEMobjpool*	pop,
+		PMEM_LSB*		lsb, 
+		const size_t	n_entries);
+
+void
+pm_lsb_hashtable_free(
+		PMEMobjpool*	pop,
+		PMEM_LSB*		lsb);
+
+void
+pm_lsb_hashtable_reset(
+		PMEMobjpool*	pop,
+		PMEM_LSB*		lsb);
+void 
+pm_lsb_hashtable_add_entry(
+		PMEMobjpool*			pop,
+		PMEM_LSB*				lsb,
+		PMEM_LSB_HASH_ENTRY*	entry);
+
+void 
+pm_lsb_hashtable_remove_entry(
+		PMEMobjpool*			pop,
+		PMEM_LSB*				lsb,
+		PMEM_LSB_HASH_ENTRY*	entry);
+
+PMEM_LSB_HASH_ENTRY*
+pm_lsb_hashtable_search_entry(
+		PMEMobjpool*			pop,
+		PMEM_LSB*				lsb,
+		PMEM_LSB_HASH_ENTRY*	in_entry);
+
+
+int
+pm_lsb_write(
+			PMEMobjpool*	pop,
+		   	PMEM_LSB*		lsb,
+		   	page_id_t		page_id,
+		   	page_size_t		size,
+		   	byte*			src_data,
+		   	bool			sync);
+
+void
+pm_lsb_assign_flusher(
+		PMEM_LSB*				lsb);
+
+void
+pm_lsb_flush_bucket(
+			PMEMobjpool*			pop,
+		   	PMEM_LSB*				lsb,
+		   	PMEM_LSB_HASH_BUCKET*	pbucket);
+//Implemented in buf0flu.cc using with pm_buf_write_with_flsuher
+void
+pm_lsb_handle_finished_block(
+		PMEMobjpool*		pop,
+	   	PMEM_LSB*			lsb,
+	   	PMEM_BUF_BLOCK*		pblock);
+#endif //UNIV_PMEMOBJ_LSB
+
+//////////////////////// End of LSB //////////////
 //Flusher
 
 /*The flusher thread
@@ -533,13 +705,15 @@ struct __pmem_flusher {
 	bool is_running;
 
 	PMEM_BUF_BLOCK_LIST** flush_list_arr;
+#if defined (UNIV_PMEMOBJ_LSB)
+	PMEM_LSB_HASH_BUCKET** bucket_arr; //array pointer to buckets in the lsb list
+#endif
 };
-void
+PMEM_FLUSHER*
 pm_flusher_init(
-				PMEM_BUF*		buf, 
 				const size_t	size);
 void
-pm_buf_flusher_close(PMEM_BUF*	buf);
+pm_buf_flusher_close(PMEM_FLUSHER*	flusher);
 
 #if defined(UNIV_PMEMOBJ_BUF_STAT)
 void

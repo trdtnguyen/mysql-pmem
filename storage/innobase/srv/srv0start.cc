@@ -1937,10 +1937,15 @@ innobase_start_or_create_for_mysql(void)
 
 #if defined (UNIV_PMEMOBJ_BUF)
 	size_t buf_size = srv_pmem_buf_size * 1024 * 1024;
+#if defined (UNIV_PMEMOBJ_LSB)
+	pm_wrapper_lsb_alloc_or_open(gb_pmw,
+							     buf_size,
+								 UNIV_PAGE_SIZE);
+#else
 	pm_wrapper_buf_alloc_or_open(gb_pmw,
 							     buf_size,
 								 UNIV_PAGE_SIZE);
-	
+#endif	
 	//[TODO] Recovery handler
 #endif /* UNIV_PMEMOBJ_BUF */
 
