@@ -2820,17 +2820,26 @@ pm_lsb_hashtable_reset(
 	PMEM_LSB_HASH_ENTRY* e;
 	PMEM_LSB_HASH_ENTRY* prev;
 	PMEM_LSB_HASHTABLE* pht = D_RW(lsb->ht);
+	PMEM_LSB_HASH_BUCKET* pbucket;
 	
 	for (i = 0; i < pht->n_buckets; ++i){
-		e = pht->buckets[i].head;
+		pbucket = &pht->buckets[i];
+		
+		//we need the lock here, read thread may access	
+		pmemobj_rwlock_wrlock(pop, &pbucket->lock);
+		//reset each bucket
+		e = pbucket->head;
 		while (e != NULL){
 			prev = e;
 			e = e->next;	
+			prev->next = NULL;
+			prev->prev=NULL;
 			free(prev);
 			prev = NULL;
 		}
-		pht->buckets[i].head = pht->buckets[i].tail = NULL;
-		pht->buckets[i].n_entries = 0;
+		pbucket->head = pht->buckets[i].tail = NULL;
+		pbucket->n_entries = 0;
+		pmemobj_rwlock_unlock(pop, &pbucket->lock);
 	}
 
 }
@@ -2858,7 +2867,7 @@ pm_lsb_hashtable_add_entry(
 	bucket = &(pht->buckets[hashed]);
 	
 	//we need the lock here, read thread may access the bucket	
-	//pmemobj_rwlock_wrlock(pop, &bucket->lock);
+	pmemobj_rwlock_wrlock(pop, &bucket->lock);
 	int hole_id = -1;
 
 	e = bucket->head;
@@ -2904,7 +2913,7 @@ pm_lsb_hashtable_add_entry(
 		bucket->tail = entry;
 	}	
 	++bucket->n_entries;
-	//pmemobj_rwlock_unlock(pop, &bucket->lock);
+	pmemobj_rwlock_unlock(pop, &bucket->lock);
 
 	return hole_id;
 }
@@ -3129,6 +3138,7 @@ pm_lsb_read(
 		bool				sync)
 {
 	ulint hashed;
+	ulint count;
 	int lsb_id;
 	byte* pdata;
 	
@@ -3139,9 +3149,10 @@ pm_lsb_read(
 	assert(pbucket);
 
 	//We need the lock here, write thread may modify the bucket
-	//pmemobj_rwlock_rdlock(pop, &pbucket->lock);
+	pmemobj_rwlock_rdlock(pop, &pbucket->lock);
 
 	pdata = lsb->p_align;
+	count = 0;
 	
 	//search in the hashtable	
 	PMEM_LSB_HASH_ENTRY* e = pbucket->head;
@@ -3155,14 +3166,18 @@ pm_lsb_read(
 			assert(pblock->size.physical() == size.physical());
 			memcpy(data, pdata + pblock->pmemaddr, pblock->size.physical()); 
 
-			//pmemobj_rwlock_unlock(pop, &pbucket->lock);
+			pmemobj_rwlock_unlock(pop, &pbucket->lock);
 			return pblock;
 		}
 		e = e->next;
+		++count;
+		if (count >= pbucket->n_entries){
+			break;
+		}
 	}//end while
 
 	//not found
-	//pmemobj_rwlock_unlock(pop, &pbucket->lock);
+	pmemobj_rwlock_unlock(pop, &pbucket->lock);
 	return NULL;
 }
 
