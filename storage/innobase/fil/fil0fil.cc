@@ -6291,6 +6291,8 @@ pm_lsb_fil_io_batch(
 		assert(pblock);
 
 		if (pblock->state == PMEM_FREE_BLOCK) {
+			printf("====> LSB skip the free block in pm_lsb_fil_io_batch \n ");
+			e = e->next;
 			continue;
 		}
 		pblock->state = PMEM_IN_FLUSH_BLOCK;	
@@ -6468,10 +6470,15 @@ pm_lsb_fil_io_batch(
 
 	//(4) Until this point, we have all params ready for io_submit()
 	dberr_t	err;
+	
+	if (n_params != pbucket->n_entries){
+		printf("LSB ERROR: n_params %zu differs from pbucket->n_entries %zu\n", n_params, pbucket->n_entries);
+	}	
+	pmemobj_rwlock_wrlock(pop, &pmem_lsb->lsb_aio_lock);	
+	pmem_lsb->n_aio_submitted += n_params;
+	pmemobj_rwlock_unlock(pop, &pmem_lsb->lsb_aio_lock);	
+
 	//see os_aio_batch_func() and AIO::pm_process_batch in os0file.cc
-#if defined (UNIV_PMEMOBJ_LSB_DEBUG)
-	printf("LSB [3] pm_lsb_fil_io_batch, transfer data to param finished, call os_aio_batch\n ");
-#endif
 	err = os_aio_batch(params, n_params);
 
 	if (err != DB_SUCCESS){

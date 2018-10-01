@@ -1092,15 +1092,17 @@ buf_flush_write_block_low(
 #if defined(UNIV_PMEMOBJ_BUF)
 	
 	//printf("\n [begin pm_buf_write space %zu page %zu==>", bpage->id.space(),bpage->id.page_no());
-//	if (!fsp_is_system_temporary(bpage->id.space())){	
-#if defined (UNIV_PMEMOBJ_BUF_V2)	
-		int ret = pm_buf_write_no_free_pool(gb_pmw->pop, gb_pmw->pbuf, bpage->id, bpage->size, frame, sync);
+
+#if defined(UNIV_PMEMOBJ_LSB)
+	int ret = pm_lsb_write(gb_pmw->pop, gb_pmw->plsb, bpage->id, bpage->size, frame, sync);
+#elif defined (UNIV_PMEMOBJ_BUF_V2)	
+	int ret = pm_buf_write_no_free_pool(gb_pmw->pop, gb_pmw->pbuf, bpage->id, bpage->size, frame, sync);
 #elif defined (UNIV_PMEMOBJ_BUF_FLUSHER)
-		int ret = pm_buf_write_with_flusher(gb_pmw->pop, gb_pmw->pbuf, bpage->id, bpage->size, frame, sync);
+	int ret = pm_buf_write_with_flusher(gb_pmw->pop, gb_pmw->pbuf, bpage->id, bpage->size, frame, sync);
 #elif defined (UNIV_PMEMOBJ_BUF_APPEND)
-		int ret = pm_buf_write_with_flusher_append(gb_pmw->pop, gb_pmw->pbuf, bpage->id, bpage->size, frame, sync);
+	int ret = pm_buf_write_with_flusher_append(gb_pmw->pop, gb_pmw->pbuf, bpage->id, bpage->size, frame, sync);
 #else
-		int ret = pm_buf_write(gb_pmw->pop, gb_pmw->pbuf, bpage->id, bpage->size, frame, sync);
+	int ret = pm_buf_write(gb_pmw->pop, gb_pmw->pbuf, bpage->id, bpage->size, frame, sync);
 #endif
 		//printf("END  pm_buf_write space %zu page %zu]\n", bpage->id.space(),bpage->id.page_no());
 		//printf(" END pm_buf_write]");
@@ -4114,9 +4116,13 @@ retry:
 					flusher->n_requested--;
 					os_event_set(flusher->is_req_full);
 					flusher->bucket_arr[i] = NULL;
+#if defined (UNIV_PMEMOBJ_LSB_DEBUG)
+			//printf("LSB [2] pm_flusher_worker flusher->size %zu bucket pointer index %zu\n", flusher->size, i);
+#endif
 					break;
 				}
 			}
+
 #else //UNIV_PMEMOBJ_BUF
 			//Case A: Implement of PB-NVM
 			for (i = 0; i < flusher->size; i++) {
@@ -4332,6 +4338,7 @@ pm_handle_finished_block_with_flusher(
 #if defined (UNIV_PMEMOBJ_LSB)
 /*
  *Handle finish block in the aio
+ Note that this function may has contention between flush threads
  * */
 void
 pm_lsb_handle_finished_block(
@@ -4340,17 +4347,21 @@ pm_lsb_handle_finished_block(
 	   	PMEM_BUF_BLOCK*		pblock)
 {
 	PMEM_FLUSHER* flusher;
+	ulint i;
 
 	//(1) handle the lsb_list
 	PMEM_BUF_BLOCK_LIST* plsb_list = D_RW(lsb->lsb_list);
 
 	//Unlike PB-NVM, LSB implement lock the lsb list until all pages finish propagation, so we don't need to lock the list
 	//pmemobj_rwlock_wrlock(pop, &pflush_list->lock);
-	lsb->n_aio_completed++;
-
-	if (lsb->n_aio_completed == plsb_list->cur_pages){
+	pmemobj_rwlock_wrlock(pop, &lsb->lsb_aio_lock);
+	++lsb->n_aio_completed;
+	
+	if (lsb->n_aio_completed == plsb_list->cur_pages)
+	//if (lsb->n_aio_completed == lsb->n_aio_submitted)
+	{
 #if defined (UNIV_PMEMOBJ_LSB_DEBUG)
-		printf("LSB [5] pm_lsb_handle_finished_block all aio finished!\n");
+		printf("LSB [5] pm_lsb_handle_finished_block ALL FINISHED lsb->n_aio_completed/n_aio_submitted  %zu/%zu cur_pages %zu max_pages %zu \n", lsb->n_aio_completed, lsb->n_aio_submitted, plsb_list->cur_pages, plsb_list->max_pages);
 #endif
 		//(0) flush spaces
 		//
@@ -4359,12 +4370,12 @@ pm_lsb_handle_finished_block(
 		arr_idx = plsb_list->param_arr_index;
 		assert(arr_idx >= 0);
 
-		pmemobj_rwlock_wrlock(pop, &lsb->param_lock);
-		lsb->param_arrs[arr_idx].is_free = true;
-		pmemobj_rwlock_unlock(pop, &lsb->param_lock);
+		for (i = 0; i < lsb->param_arr_size; ++i){
+			lsb->param_arrs[i].is_free = true;
+		}
+		lsb->cur_free_param = 0;
 
 		//(1) Reset blocks in the list
-		ulint i;
 		for (i = 0; i < plsb_list->max_pages; i++) {
 			D_RW(D_RW(plsb_list->arr)[i])->state = PMEM_FREE_BLOCK;
 			D_RW(D_RW(plsb_list->arr)[i])->sync = false;
@@ -4374,12 +4385,21 @@ pm_lsb_handle_finished_block(
 
 		//(2) Reset the hashtable
 		pm_lsb_hashtable_reset(pop, lsb);
-		lsb->n_aio_completed = 0;
+		lsb->n_aio_submitted = lsb->n_aio_completed = 0;
 
-		//(3) wakeup 
+		// (3) Reset the flusher
+		flusher = lsb->flusher;
+		mutex_enter(&flusher->mutex);
+		for (i = 0; i < flusher->size; ++i) {
+			flusher->bucket_arr[i] = NULL;
+		}
+		flusher->n_requested = 0;
+		mutex_exit(&flusher->mutex);
+
+		//(4) wakeup the write thread
 		os_event_set(lsb->all_aio_finished);
 	}
-
+	pmemobj_rwlock_unlock(pop, &lsb->lsb_aio_lock);
 }
 #endif //UNIV_PMEMOBJ_LSB
 
@@ -4423,7 +4443,11 @@ DECLARE_THREAD(pm_buf_flush_list_cleaner_coordinator)(
 #endif /* UNIV_PFS_THREAD */
 
 #if defined(UNIV_PMEMOBJ_BUF_FLUSHER)
+#if defined (UNIV_PMEMOBJ_LSB)
+	PMEM_FLUSHER* flusher = gb_pmw->plsb->flusher;
+#else
 	PMEM_FLUSHER* flusher = gb_pmw->pbuf->flusher;
+#endif //UNIV_PMEMOBJ_LSB
 #endif
 
 	while (srv_shutdown_state == SRV_SHUTDOWN_NONE) {

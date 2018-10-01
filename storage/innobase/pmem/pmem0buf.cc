@@ -2606,6 +2606,7 @@ pm_wrapper_lsb_alloc_or_open(
 	 */
 	PMEM_BUF_BLOCK_LIST* plist;
 	ulint arr_size = 2 * PMEM_N_BUCKETS;
+	ulint max_bucket_size = buf_size / page_size; 
 
 	pmw->plsb->param_arr_size = arr_size;
 	pmw->plsb->param_arrs = static_cast<PMEM_AIO_PARAM_ARRAY*> (
@@ -2614,7 +2615,8 @@ pm_wrapper_lsb_alloc_or_open(
 		//plist = D_RW(D_RW(pmw->pbuf->buckets)[i]);
 
 		pmw->plsb->param_arrs[i].params = static_cast<PMEM_AIO_PARAM*> (
-				calloc(PMEM_BUCKET_SIZE, sizeof(PMEM_AIO_PARAM)));
+				//the worse case is one bucket has all pages in lsb list, alloc the size to max_bucket_size
+				calloc(max_bucket_size, sizeof(PMEM_AIO_PARAM)));
 		pmw->plsb->param_arrs[i].is_free = true;
 	}
 	pmw->plsb->cur_free_param = 0; //start with the 0
@@ -2708,6 +2710,7 @@ pm_pop_lsb_alloc(
 	pmemobj_persist(pop, plsb, sizeof(*plsb));
 
 	//(3) init the hashtable
+	pm_lsb_hashtable_init(pop, plsb, PMEM_N_BUCKETS);
 	
 	return plsb;
 } 
@@ -2826,6 +2829,7 @@ pm_lsb_hashtable_reset(
 			free(prev);
 			prev = NULL;
 		}
+		pht->buckets[i].head = pht->buckets[i].tail = NULL;
 		pht->buckets[i].n_entries = 0;
 	}
 
@@ -2836,7 +2840,7 @@ pm_lsb_hashtable_reset(
  * The caller must acquire the lsb_list lock
  * */
 
-void 
+int 
 pm_lsb_hashtable_add_entry(
 		PMEMobjpool*			pop,
 		PMEM_LSB*				lsb,
@@ -2853,23 +2857,36 @@ pm_lsb_hashtable_add_entry(
 	PMEM_HASH_KEY(hashed, entry->id.fold(), pht->n_buckets);
 	bucket = &(pht->buckets[hashed]);
 	
+	//we need the lock here, read thread may access the bucket	
+	//pmemobj_rwlock_wrlock(pop, &bucket->lock);
+	int hole_id = -1;
+
 	e = bucket->head;
 
 	//(1) On-the-fly reclaiming the duplicated page
 	while (e != NULL){
 		if (e->id.equals_to(entry->id)){
-			//Set the hole in the lsb list
-			int i = e->lsb_entry_id;
-			PMEM_BUF_BLOCK* pblock = D_RW(D_RW(plist->arr)[i]);
-			pblock->state = PMEM_FREE_BLOCK;
-			--plist->cur_pages;
+			hole_id = e->lsb_entry_id;
 			//Remove the entry in hashtable
-			tem = e->prev;
-			tem->next = e->next;
-			e->next->prev = tem;	
+			if (e->prev == NULL){
+				//The head entry
+				bucket->head = e->next;
+				if (e->next != NULL)
+					e->next->prev = NULL;
+			}
+			else if (e->next == NULL){
+				bucket->tail = e->prev;
+				e->prev->next = NULL;
+			}
+			else {
+				tem = e->prev;
+				tem->next = e->next;
+				e->next->prev = tem;	
+			}
 			e->prev = NULL;
 			e->next = NULL;
 			free(e);
+			e = NULL;
 			--bucket->n_entries;
 			break;
 		}
@@ -2884,9 +2901,12 @@ pm_lsb_hashtable_add_entry(
 		//add to the tail of the bucket
 		bucket->tail->next = entry;
 		entry->prev = bucket->tail;
-		bucket->tail = bucket->tail->next;
+		bucket->tail = entry;
 	}	
 	++bucket->n_entries;
+	//pmemobj_rwlock_unlock(pop, &bucket->lock);
+
+	return hole_id;
 }
 
 PMEM_LSB_HASH_ENTRY*
@@ -2947,9 +2967,15 @@ pm_lsb_write(
 
 	page_size = size.physical();
 
+try_again:
 	//acquire lock
 	pmemobj_rwlock_wrlock(pop, &lsb->lsb_lock);
-
+	if (plist->cur_pages >= plist->max_pages && plist->is_flush){
+		
+		pmemobj_rwlock_unlock(pop, &lsb->lsb_lock);
+		os_event_wait(lsb->all_aio_finished);
+		goto try_again;
+	}	
 	//(1) Search the first free slot in the lsb list
 	for (i = 0; i < plist->max_pages; ++i){
 		pblock = D_RW(D_RW(plist->arr)[i]);
@@ -2977,21 +3003,35 @@ pm_lsb_write(
 	pmemobj_memcpy_persist(pop, pdata + pfree_block->pmemaddr, src_data, page_size); 
 
 	++plist->cur_pages;
-	// (3) Add entry in the hashtable
+	// (3) Add a corresponding entry in the hashtable
 	PMEM_LSB_HASH_ENTRY* e = (PMEM_LSB_HASH_ENTRY*) malloc(sizeof(PMEM_LSB_HASH_ENTRY));
 	strcpy(e->file_name, node->name);
 	e->id.copy_from(page_id);
 	e->size = page_size;
 	//save the id of the list entry, use this for making the hole in reclaiming process
 	e->lsb_entry_id = i_free;
+	e->next = e->prev = NULL;	
+	//add entry in the hashtable, if the entry with page_id exist, remove it and set the corresponding page in lsb list as a hole	
 	
-	pm_lsb_hashtable_add_entry(pop, lsb, e);
+	int hole_id = pm_lsb_hashtable_add_entry(pop, lsb, e);
+	if (hole_id >= 0){
+		//Set the hole in the lsb list
+		PMEM_BUF_BLOCK* phole_block = D_RW(D_RW(plist->arr)[hole_id]);
+		phole_block->state = PMEM_FREE_BLOCK;
+#if defined (UNIV_PMEMOBJ_LSB_DEBUG)
+		printf("LSB: reclaim exist page at %d, cur_pages / max_pages %zu/%zu \n", hole_id, plist->cur_pages, plist->max_pages);
+#endif
+		--plist->cur_pages;
+	}
 	
-	if (plist->cur_pages >= plist->max_pages){
+	if (plist->cur_pages >= plist->max_pages - 2){
 #if defined (UNIV_PMEMOBJ_LSB_DEBUG)
 		printf("LSB [1] pm_lsb_write the lsb list is full\n");
 #endif
 		//handle full lsb list
+		plist->is_flush = true;
+		os_event_reset(lsb->all_aio_finished);
+
 		pm_lsb_assign_flusher(lsb);
 #if defined (UNIV_PMEMOBJ_LSB_DEBUG)
 		printf("LSB [4] pm_lsb_write finish assign flusher threads\n");
@@ -2999,6 +3039,7 @@ pm_lsb_write(
 		//wait for AIO finish
 		os_event_wait(lsb->all_aio_finished);
 		//now all aio finished
+		plist->is_flush = false;
 #if defined (UNIV_PMEMOBJ_LSB_DEBUG)
 		printf("LSB [6] pm_lsb_write wake from sleep.\n");
 #endif
@@ -3017,6 +3058,7 @@ pm_lsb_assign_flusher(
 		PMEM_LSB*				lsb)
 {
 	ulint i;
+	ulint n_pages = 0; //n_pages to the flusher
 
 	PMEM_FLUSHER* flusher = lsb->flusher;
 	PMEM_LSB_HASHTABLE* pht = D_RW(lsb->ht);
@@ -3027,14 +3069,28 @@ pm_lsb_assign_flusher(
 	assert(flusher->size >= pht->n_buckets);
 	
 	//this value is set 0 here and increase in pm_lsb_handle_finished_block() in buf0flu.cc	
-	lsb->n_aio_completed = 0;
+	lsb->n_aio_submitted = lsb->n_aio_completed = 0;
+
+	flusher->n_requested = 0;
 
 	for (i = 0; i < pht->n_buckets; ++i) {
 		pbucket = &pht->buckets[i];
-		flusher->bucket_arr[i] = pbucket;
+		//skip empty bucket
+		if (pbucket->n_entries == 0){
+#if defined(UNIV_PMEMOBJ_LSB_DEBUG)
+			printf("LSB ==> bucket %zu has no entry, skip it! \n", i);
+#endif
+			continue;
+		}
+
+		flusher->bucket_arr[flusher->n_requested] = pbucket;
 		++flusher->n_requested;
+		n_pages += pbucket->n_entries;
 	}
 	//trigger the worker thread
+#if defined(UNIV_PMEMOBJ_LSB_DEBUG)
+	printf("LSB [2] Before call flusher worker, n_requests %zu n_pages %zu \n", flusher->n_requested, n_pages);
+#endif
 	os_event_set(flusher->is_req_not_empty);
 	//os_event_reset(flusher->is_req_full);
 
@@ -3059,6 +3115,58 @@ pm_lsb_flush_bucket(
 		dberr_t err = pm_lsb_fil_io_batch(request, pop, lsb, pbucket);
 		
 }
+/*
+ * Read a page from the LSB using page_id as key
+ * Searching in the hashtable, get the corresponding block in case the block is found
+ * */
+const PMEM_BUF_BLOCK* 
+pm_lsb_read(
+		PMEMobjpool*		pop,
+	   	PMEM_LSB*			lsb,
+	   	const page_id_t		page_id,
+	   	const page_size_t	size,
+	   	byte*				data, 
+		bool				sync)
+{
+	ulint hashed;
+	int lsb_id;
+	byte* pdata;
+	
+	PMEM_LSB_HASH_BUCKET* pbucket;
+	
+	PMEM_HASH_KEY(hashed, page_id.fold(), PMEM_N_BUCKETS);
+	pbucket = &(D_RW(lsb->ht))->buckets[hashed];
+	assert(pbucket);
+
+	//We need the lock here, write thread may modify the bucket
+	//pmemobj_rwlock_rdlock(pop, &pbucket->lock);
+
+	pdata = lsb->p_align;
+	
+	//search in the hashtable	
+	PMEM_LSB_HASH_ENTRY* e = pbucket->head;
+	while (e != NULL){
+		if (e->id.equals_to(page_id)){
+			//found, get the corresponding block in the lsb list
+			lsb_id = e->lsb_entry_id;
+			const PMEM_BUF_BLOCK* pblock = D_RO(D_RO(D_RO(lsb->lsb_list)->arr)[lsb_id]);
+			
+			assert(pblock);
+			assert(pblock->size.physical() == size.physical());
+			memcpy(data, pdata + pblock->pmemaddr, pblock->size.physical()); 
+
+			//pmemobj_rwlock_unlock(pop, &pbucket->lock);
+			return pblock;
+		}
+		e = e->next;
+	}//end while
+
+	//not found
+	//pmemobj_rwlock_unlock(pop, &pbucket->lock);
+	return NULL;
+}
+
+
 #endif //UNIV_PMEMOBJ_LSB
 //////////////////////// STATISTICS FUNCTS/////////////////////
 

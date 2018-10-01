@@ -547,6 +547,7 @@ struct __pmem_lsb_hash_entry_t{
 
 };
 struct __pmem_lsb_hash_bucket_t{
+	PMEMrwlock				lock;//the bucket lock
 	__pmem_lsb_hash_entry_t* head;
 	__pmem_lsb_hash_entry_t* tail;
 	size_t n_entries;
@@ -561,6 +562,11 @@ struct __pmem_lsb_hashtable_t{
 struct __pmem_LSB {
 	//centralized mutex lock for whole buffer
 	PMEMrwlock				lsb_lock;
+	
+	//the lock protect counters in AIO
+	PMEMrwlock				lsb_aio_lock;
+	ulint n_aio_completed;
+	ulint n_aio_submitted;
 
 	os_event_t			all_aio_finished;
 
@@ -576,7 +582,6 @@ struct __pmem_LSB {
 	TOID(PMEM_LSB_HASHTABLE) ht;
 	TOID(PMEM_BUF_BLOCK_LIST) lsb_list; //list of page 0 used in recovery
 
-	ulint n_aio_completed;
 
 	FILE* deb_file;
 
@@ -631,7 +636,7 @@ void
 pm_lsb_hashtable_reset(
 		PMEMobjpool*	pop,
 		PMEM_LSB*		lsb);
-void 
+int 
 pm_lsb_hashtable_add_entry(
 		PMEMobjpool*			pop,
 		PMEM_LSB*				lsb,
@@ -674,6 +679,15 @@ pm_lsb_handle_finished_block(
 		PMEMobjpool*		pop,
 	   	PMEM_LSB*			lsb,
 	   	PMEM_BUF_BLOCK*		pblock);
+
+const PMEM_BUF_BLOCK* 
+pm_lsb_read(
+		PMEMobjpool*		pop,
+	   	PMEM_LSB*			lsb,
+	   	const page_id_t		page_id,
+	   	const page_size_t	size,
+	   	byte*				data, 
+		bool				sync);
 #endif //UNIV_PMEMOBJ_LSB
 
 //////////////////////// End of LSB //////////////

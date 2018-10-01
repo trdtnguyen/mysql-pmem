@@ -1980,7 +1980,12 @@ innobase_start_or_create_for_mysql(void)
 		os_thread_sleep(10000);
 	}
 #if defined (UNIV_PMEMOBJ_BUF) 
+#if defined (UNIV_PMEMOBJ_LSB)
+	//do nothing
+#else
 	os_thread_create(pm_buf_flush_list_cleaner_coordinator, NULL, NULL);
+#endif //UNIV_PMEMOBJ_LSB
+
 #if defined (UNIV_PMEMOBJ_BUF_FLUSHER)
 	//os_thread_create(pm_flusher_coordinator, NULL, NULL);
 	printf("PMEM_INFO: ========>   create %d worker threads for pm\n", srv_pmem_n_flush_threads);
