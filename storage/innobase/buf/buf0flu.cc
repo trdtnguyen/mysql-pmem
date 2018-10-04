@@ -4356,6 +4356,7 @@ pm_lsb_handle_finished_block(
 	//pmemobj_rwlock_wrlock(pop, &pflush_list->lock);
 	pmemobj_rwlock_wrlock(pop, &lsb->lsb_aio_lock);
 	++lsb->n_aio_completed;
+	pmemobj_rwlock_unlock(pop, &lsb->lsb_aio_lock);
 	
 	if (lsb->n_aio_completed == plsb_list->cur_pages)
 	//if (lsb->n_aio_completed == lsb->n_aio_submitted)
@@ -4399,7 +4400,6 @@ pm_lsb_handle_finished_block(
 		//(4) wakeup the write thread
 		os_event_set(lsb->all_aio_finished);
 	}
-	pmemobj_rwlock_unlock(pop, &lsb->lsb_aio_lock);
 }
 #endif //UNIV_PMEMOBJ_LSB
 
@@ -4442,13 +4442,6 @@ DECLARE_THREAD(pm_buf_flush_list_cleaner_coordinator)(
 	pfs_register_thread(pm_list_cleaner_thread_key);
 #endif /* UNIV_PFS_THREAD */
 
-#if defined(UNIV_PMEMOBJ_BUF_FLUSHER)
-#if defined (UNIV_PMEMOBJ_LSB)
-	PMEM_FLUSHER* flusher = gb_pmw->plsb->flusher;
-#else
-	PMEM_FLUSHER* flusher = gb_pmw->pbuf->flusher;
-#endif //UNIV_PMEMOBJ_LSB
-#endif
 
 	while (srv_shutdown_state == SRV_SHUTDOWN_NONE) {
 		//print out each 10s 
@@ -4456,14 +4449,12 @@ DECLARE_THREAD(pm_buf_flush_list_cleaner_coordinator)(
 		if (srv_shutdown_state != SRV_SHUTDOWN_NONE) {
 			break;
 		}
+#if defined (UNIV_PMEMOBJ_LSB)
+		printf("cur lsb_list cur pages/max_pages = %zu/%zu\n", D_RW(gb_pmw->plsb->lsb_list)->cur_pages, D_RW(gb_pmw->plsb->lsb_list)->max_pages);
+#else
 		printf("cur free list = %zu, cur spec_list = %zu\n",
 			   	D_RW(gb_pmw->pbuf->free_pool)->cur_lists,
 				D_RW(gb_pmw->pbuf->spec_list)->cur_pages);
-
-#if defined(UNIV_PMEMOBJ_BUF_FLUSHER)
-		//mutex_enter(&flusher->mutex);
-		//printf(" n_requested/size %zu/%zu \n", flusher->n_requested, flusher->size);
-		//mutex_exit(&flusher->mutex);
 #endif
 	} //end while thread
 

@@ -6474,9 +6474,9 @@ pm_lsb_fil_io_batch(
 	if (n_params != pbucket->n_entries){
 		printf("LSB ERROR: n_params %zu differs from pbucket->n_entries %zu\n", n_params, pbucket->n_entries);
 	}	
-	pmemobj_rwlock_wrlock(pop, &pmem_lsb->lsb_aio_lock);	
-	pmem_lsb->n_aio_submitted += n_params;
-	pmemobj_rwlock_unlock(pop, &pmem_lsb->lsb_aio_lock);	
+	//pmemobj_rwlock_wrlock(pop, &pmem_lsb->lsb_aio_lock);	
+	//pmem_lsb->n_aio_submitted += n_params;
+	//pmemobj_rwlock_unlock(pop, &pmem_lsb->lsb_aio_lock);	
 
 	//see os_aio_batch_func() and AIO::pm_process_batch in os0file.cc
 	err = os_aio_batch(params, n_params);

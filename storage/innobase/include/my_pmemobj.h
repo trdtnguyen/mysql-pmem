@@ -669,6 +669,11 @@ pm_lsb_assign_flusher(
 		PMEM_LSB*				lsb);
 
 void
+pm_lsb_flush_bucket_batch(
+			PMEMobjpool*			pop,
+		   	PMEM_LSB*				lsb,
+		   	PMEM_LSB_HASH_BUCKET*	pbucket);
+void
 pm_lsb_flush_bucket(
 			PMEMobjpool*			pop,
 		   	PMEM_LSB*				lsb,

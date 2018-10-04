@@ -1981,7 +1981,7 @@ innobase_start_or_create_for_mysql(void)
 	}
 #if defined (UNIV_PMEMOBJ_BUF) 
 #if defined (UNIV_PMEMOBJ_LSB)
-	//do nothing
+	os_thread_create(pm_buf_flush_list_cleaner_coordinator, NULL, NULL);
 #else
 	os_thread_create(pm_buf_flush_list_cleaner_coordinator, NULL, NULL);
 #endif //UNIV_PMEMOBJ_LSB
@@ -2862,7 +2862,6 @@ innobase_shutdown_for_mysql(void)
 	the tablespace header(s), and copy all log data to archive.
 	The step 1 is the real InnoDB shutdown. The remaining steps 2 - ...
 	just free data structures after the shutdown. */
-
 	logs_empty_and_mark_files_at_shutdown();
 
 	if (srv_conc_get_active_threads() != 0) {

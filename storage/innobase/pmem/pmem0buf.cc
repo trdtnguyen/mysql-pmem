@@ -2591,8 +2591,9 @@ pm_wrapper_lsb_alloc_or_open(
 	// Part 2: D-RAM structures and open file(s)
 	// ///////////////////////////////////////////////////
 	
-	//init threads for handle flushing, implement in buf0flu.cc
-	pmw->plsb->flusher = pm_flusher_init(PMEM_N_FLUSH_THREADS);
+	//init threads for handle flushing, implement in buf0flu.cc, each thread handle one bucket
+	//pmw->plsb->flusher = pm_flusher_init(PMEM_N_FLUSH_THREADS);
+	pmw->plsb->flusher = pm_flusher_init(PMEM_N_BUCKETS);
 
 	//In any case (new allocation or resued, we should allocate the flush_events for buckets in DRAM
 	pmw->plsb->flush_events = (os_event_t*) calloc(PMEM_N_BUCKETS, sizeof(os_event_t));
@@ -3105,8 +3106,12 @@ pm_lsb_assign_flusher(
 
 	mutex_exit(&flusher->mutex);
 }
+/*
+ * Propagate all pages in the bucket using batch AIO
+ * (one io_submit() for all pages)
+ * */
 void
-pm_lsb_flush_bucket(
+pm_lsb_flush_bucket_batch(
 		PMEMobjpool*			pop,
 	   	PMEM_LSB*				lsb,
 	   	PMEM_LSB_HASH_BUCKET*	pbucket) {
@@ -3123,6 +3128,66 @@ pm_lsb_flush_bucket(
 		//pm_fil_io_batch() defined in fil0fil.h and implemented in fil0fil.cc
 		dberr_t err = pm_lsb_fil_io_batch(request, pop, lsb, pbucket);
 		
+}
+/*
+ * Propagate each page in the bucket using normal AIO (one io_submit() for one page)
+ * */
+void
+pm_lsb_flush_bucket(
+		PMEMobjpool*			pop,
+		PMEM_LSB*				lsb,
+		PMEM_LSB_HASH_BUCKET*	pbucket) {
+
+	assert(pop);
+	assert(lsb);
+	ulint count;
+
+#if defined (UNIV_PMEMOBJ_BUF)
+	ulint type = IORequest::PM_WRITE;
+#else
+	ulint type = IORequest::WRITE;
+#endif
+	IORequest request(type);
+
+	PMEM_BUF_BLOCK* pblock;
+	PMEM_BUF_BLOCK_LIST* plsb_list;
+	byte* pdata;
+	PMEM_LSB_HASH_ENTRY* e;
+
+	pdata = lsb->p_align;
+	plsb_list = D_RW(lsb->lsb_list);
+	
+	count = 0;
+	e = pbucket->head;
+	while (e != NULL){
+		//Get the corresponding pblock with this hashtable entry
+		int id = e->lsb_entry_id;
+		assert(id >= 0 && id < plsb_list->max_pages);
+
+		pblock = D_RW(D_RW(plsb_list->arr)[id]);
+		assert(pblock);
+
+		if (pblock->state == PMEM_FREE_BLOCK) {
+			printf("====> LSB skip the free block in pm_lsb_fil_io_batch \n ");
+			e = e->next;
+			continue;
+		}
+		pblock->state = PMEM_IN_FLUSH_BLOCK;	
+		dberr_t err = fil_io(request, 
+			false, pblock->id, pblock->size, 0, pblock->size.physical(),
+			pdata + pblock->pmemaddr, pblock);
+		if (err != DB_SUCCESS){
+			printf("PMEM_ERROR: fil_io() in pm_buf_list_write_to_datafile() space_id = %"PRIu32" page_id = %"PRIu32" size = %zu \n ", pblock->id.space(), pblock->id.page_no(), pblock->size.physical());
+			assert(0);
+		}
+
+		++count;
+		if (count >= pbucket->n_entries)
+			break;
+		e = e->next;
+
+	}//end while for each page in the bucket
+
 }
 /*
  * Read a page from the LSB using page_id as key
@@ -3142,6 +3207,8 @@ pm_lsb_read(
 	int lsb_id;
 	byte* pdata;
 	
+	bool is_lock_bucket = true;
+
 	PMEM_LSB_HASH_BUCKET* pbucket;
 	
 	PMEM_HASH_KEY(hashed, page_id.fold(), PMEM_N_BUCKETS);
@@ -3149,7 +3216,8 @@ pm_lsb_read(
 	assert(pbucket);
 
 	//We need the lock here, write thread may modify the bucket
-	pmemobj_rwlock_rdlock(pop, &pbucket->lock);
+	if(is_lock_bucket)
+		pmemobj_rwlock_rdlock(pop, &pbucket->lock);
 
 	pdata = lsb->p_align;
 	count = 0;
@@ -3166,7 +3234,8 @@ pm_lsb_read(
 			assert(pblock->size.physical() == size.physical());
 			memcpy(data, pdata + pblock->pmemaddr, pblock->size.physical()); 
 
-			pmemobj_rwlock_unlock(pop, &pbucket->lock);
+			if(is_lock_bucket)
+				pmemobj_rwlock_unlock(pop, &pbucket->lock);
 			return pblock;
 		}
 		e = e->next;
@@ -3177,7 +3246,8 @@ pm_lsb_read(
 	}//end while
 
 	//not found
-	pmemobj_rwlock_unlock(pop, &pbucket->lock);
+	if(is_lock_bucket)
+		pmemobj_rwlock_unlock(pop, &pbucket->lock);
 	return NULL;
 }
 
