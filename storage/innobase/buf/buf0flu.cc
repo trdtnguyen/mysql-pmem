@@ -4365,6 +4365,7 @@ pm_lsb_handle_finished_block(
 		printf("LSB [5] pm_lsb_handle_finished_block ALL FINISHED lsb->n_aio_completed/n_aio_submitted  %zu/%zu cur_pages %zu max_pages %zu \n", lsb->n_aio_completed, lsb->n_aio_submitted, plsb_list->cur_pages, plsb_list->max_pages);
 #endif
 		//(0) flush spaces
+		pm_lsb_flush_spaces_in_list(pop, lsb, plsb_list);
 		//
 		// Reset the param_array
 		ulint arr_idx;

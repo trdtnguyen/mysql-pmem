@@ -6971,6 +6971,82 @@ pm_buf_flush_spaces_in_list(
 	ut_free(space_ids);
 
 }
+#if defined (UNIV_PMEMOBJ_LSB)
+/*
+ *This function used in pm_lsb_handle_finished_block
+ When all pages in the lsb list are finished AIO, we reset it. 
+ We call fsync() for all spaces in this list
+ See fil_flush_file_spaces() in fil/fil0fil.cc
+ * */
+void
+pm_lsb_flush_spaces_in_list(
+		void*	pop_in,
+	   	void*	lsb_in,
+	   	void*	pflush_list_in){
+	
+	PMEMobjpool* pop = static_cast<PMEMobjpool*> (pop_in);
+	PMEM_LSB* lsb = static_cast<PMEM_LSB*> (lsb_in);
+	PMEM_BUF_BLOCK_LIST* pflush_list = static_cast<PMEM_BUF_BLOCK_LIST*> (pflush_list_in);
+	PMEM_BUF_BLOCK* pblock;
+
+	ulint		i;	
+	ulint		j;	
+	bool		is_existed;
+	fil_space_t*	space;
+	ulint*		space_ids;
+	ulint		n_space_ids;
+
+	assert(pop);
+	assert(lsb);
+	assert(pflush_list);
+
+	ulint type = IORequest::PM_WRITE;
+	IORequest		req_type(type);
+
+	mutex_enter(&fil_system->mutex);
+	
+	space_ids = static_cast<ulint*> (
+		ut_malloc_nokey(pflush_list->max_pages * sizeof(*space_ids)));
+
+	n_space_ids = 0;	
+/*[TODO] This approach is O(n^2) expensive	
+ * If pages in the list is sorted by space_ids than the cost is only O(n)
+ * */
+	for (i = 0; i < pflush_list->max_pages; i++) {
+		pblock = D_RW(D_RW(pflush_list->arr)[i]);
+
+		ulint space_id = pblock->id.space();
+		space =fil_space_get_by_id(space_id);
+		
+		//scan for existed space_ids in the list
+		is_existed = false;
+		for (j = 0; j < n_space_ids; j++){
+			if (space_ids[j] == space_id){
+				is_existed = true;
+				break;
+			}
+		}	
+
+		if (is_existed)
+			continue;
+
+		if (space->purpose == FIL_TYPE_TABLESPACE &&
+		     !space->stop_new_ops &&
+			 !space->is_being_truncated) {
+
+			space_ids[n_space_ids++] = space_id;	
+		}
+	}
+
+	mutex_exit(&fil_system->mutex);
+
+	for (ulint i = 0; i < n_space_ids; i++) {
+		fil_flush(space_ids[i]);
+	}
+	ut_free(space_ids);
+
+}
+#endif //UNIV_PMEMOBJ_LSB
 #endif 
 /** Flush to disk the writes in file spaces of the given type
 possibly cached by the OS.

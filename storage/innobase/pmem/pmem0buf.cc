@@ -1161,7 +1161,11 @@ pm_buf_write_with_flusher(
 						strstr(pspec_block->file_name, node->name) != 0) {
 					//overwrite this spec block
 					pspec_block->sync = sync;
+
+TX_BEGIN(pop) {
 					pmemobj_memcpy_persist(pop, pdata + pspec_block->pmemaddr, src_data, page_size); 
+}TX_ONABORT {
+}TX_END
 					//update the file_name, page_id in case of tmp space
 					strcpy(pspec_block->file_name, node->name);
 					pspec_block->id.copy_from(page_id);
@@ -1198,7 +1202,10 @@ pm_buf_write_with_flusher(
 			//pspec_block->file_handle = node->handle;
 			strcpy(pspec_block->file_name, node->name);
 
+TX_BEGIN(pop) {
 			pmemobj_memcpy_persist(pop, pdata + pspec_block->pmemaddr, src_data, page_size); 
+}TX_ONABORT {
+}TX_END
 			++(pspec_list->cur_pages);
 
 			printf("Add new block to the spec list, space_no %zu,file %s cur_pages %zu \n", page_id.space(),node->name,  pspec_list->cur_pages);
@@ -1290,7 +1297,10 @@ retry:
 					}
 				}
 				pfree_block->sync = sync;
+TX_BEGIN(pop) {
 				pmemobj_memcpy_persist(pop, pdata + pfree_block->pmemaddr, src_data, page_size); 
+}TX_ONABORT {
+}TX_END
 #if defined (UNIV_PMEMOBJ_BUF_STAT)
 				++buf->bucket_stats[hashed].n_overwrites;
 #endif
@@ -3010,7 +3020,11 @@ try_again:
 
 	pfree_block->state = PMEM_IN_USED_BLOCK;
 
+TX_BEGIN(pop) {
 	pmemobj_memcpy_persist(pop, pdata + pfree_block->pmemaddr, src_data, page_size); 
+}TX_ONABORT {
+
+}TX_END
 
 	++plist->cur_pages;
 	// (3) Add a corresponding entry in the hashtable

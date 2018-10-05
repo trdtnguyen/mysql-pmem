@@ -1247,6 +1247,11 @@ pm_lsb_fil_io_batch(
 		void*				pop_in,
 		void*				pmem_lsb_in,
 		void*				pbucket_in);
+void
+pm_lsb_flush_spaces_in_list(
+		void* pop_in,
+	   	void* lsb_in,
+	   	void* flush_list_in);
 #endif //UNIV_PMEMOBJ_LSB
 
 //This function support to get the file handle from space
