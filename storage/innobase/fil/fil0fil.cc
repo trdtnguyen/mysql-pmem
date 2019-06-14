@@ -6216,6 +6216,281 @@ pm_fil_io_batch(
 
 }
 
+#if defined (UNIV_PMEMOBJ_LSB)
+dberr_t
+pm_lsb_fil_io_batch(
+		const IORequest&	type,
+		void*				pop_in,
+		void*				pmem_lsb_in,
+		void*				pbucket_in)
+{
+	PMEMobjpool*			pop;
+	PMEM_LSB*				pmem_lsb;
+	PMEM_LSB_HASH_BUCKET*	pbucket;	
+
+	ulint i;
+	TOID(PMEM_BUF_BLOCK) flush_block;
+	PMEM_BUF_BLOCK* pblock;
+	PMEM_BUF_BLOCK_LIST* plsb_list;
+	byte* pdata;
+
+	PMEM_AIO_PARAM* params;
+	uint64_t		n_params;
+	
+	os_offset_t		offset;
+	IORequest		req_type(type);
+	ulint	mode = OS_AIO_NORMAL; //we only do the OS_AIO_NORMAL 
+	
+	pop			= static_cast<PMEMobjpool*> (pop_in);
+	pmem_lsb	= static_cast<PMEM_LSB*> (pmem_lsb_in);
+	pbucket		= static_cast<PMEM_LSB_HASH_BUCKET*> (pbucket_in); 
+
+	plsb_list = D_RW(pmem_lsb->lsb_list);
+
+	assert(pop);
+	assert(pmem_lsb);
+	assert(pbucket);
+	assert(plsb_list);
+
+	pdata = pmem_lsb->p_align;
+	ulint cur_free = pmem_lsb->cur_free_param;
+	ulint arr_size = pmem_lsb->param_arr_size;
+
+	//(1) find a free params to fill aio_batch info
+	pmemobj_rwlock_wrlock(pop, &pmem_lsb->param_lock);
+		
+	for (i = 0; i < arr_size; i++) {
+		if (pmem_lsb->param_arrs[cur_free].is_free) {
+			params = pmem_lsb->param_arrs[cur_free].params;
+			pmem_lsb->param_arrs[cur_free].is_free = false; //we set this true in io_complete
+			pbucket->param_arr_index = cur_free;
+			pmem_lsb->cur_free_param = (cur_free + 1) % arr_size;
+			break;
+		}
+		else {
+			cur_free = (cur_free + 1) % arr_size;
+		}
+	}
+	if (i == arr_size) {
+		//There is no free params to assign
+		printf("PMEM_ERROR: there is no free params to assign");
+		assert(0);
+	}
+	pmemobj_rwlock_unlock(pop, &pmem_lsb->param_lock);
+
+	n_params = 0;
+
+	// (2) For each entry in the bucket, get the corresponding block and transfer data from this block to param
+	PMEM_LSB_HASH_ENTRY* e = pbucket->head;
+	while (e != NULL){
+		//Get the corresponding pblock with this hashtable entry
+		int id = e->lsb_entry_id;
+		assert(id >= 0 && id < plsb_list->max_pages);
+
+		pblock = D_RW(D_RW(plsb_list->arr)[id]);
+		assert(pblock);
+
+		if (pblock->state == PMEM_FREE_BLOCK) {
+			printf("====> LSB skip the free block in pm_lsb_fil_io_batch \n ");
+			e = e->next;
+			continue;
+		}
+		pblock->state = PMEM_IN_FLUSH_BLOCK;	
+
+		//Below code merged from fil_io //////////////////////
+		const page_id_t&	page_id = pblock->id;
+		const page_size_t&	page_size = pblock->size;
+		ulint			byte_offset = 0;
+		ulint			len = pblock->size.physical() ;
+		void*			buf = pdata + pblock->pmemaddr;
+		void*			message = pblock ;
+		srv_stats.data_written.add(len);
+
+		/* Reserve the fil_system mutex and make sure that we can open at
+		   least one file while holding it, if the file is not already open */
+
+		fil_mutex_enter_and_prepare_for_io(page_id.space());
+		fil_space_t*	space = fil_space_get_by_id(page_id.space());
+
+		//Handle the case that space == NULL
+		if (space == NULL) {
+			printf("Space_id %zu is temp file %d\n",page_id.space(), fsp_is_system_temporary(page_id.space()));
+			printf("pm_fil_io_batch error, get space instance from space_no %zu page_no %zu file_name %s is NULL\n",
+				   	page_id.space(), page_id.page_no(), pblock->file_name);
+
+			//try to get by name
+			//space = fil_space_get_by_name(pblock->file_name);
+			//
+			mutex_exit(&fil_system->mutex);
+			//inside this function there is a mutex enter/exit 
+			fil_ibd_load(page_id.space(), pblock->file_name, space);
+
+			mutex_enter(&fil_system->mutex);
+
+			if (space == NULL) {
+				printf("=====> Ooops try to think more\n");
+				assert(0);
+			}
+			else {
+				printf("=======> Great!!!!\n");
+			}
+			//assert(0);
+		}
+		ulint		cur_page_no = page_id.page_no();
+		fil_node_t*	node = UT_LIST_GET_FIRST(space->chain);
+		/* Open file if closed */
+		if (!fil_node_prepare_for_io(node, fil_system, space)) {
+			if (fil_type_is_data(space->purpose)
+					&& fil_is_user_tablespace_id(space->id)) {
+				mutex_exit(&fil_system->mutex);
+
+				if (!req_type.ignore_missing()) {
+					ib::error()
+						<< "Trying to do I/O to a tablespace"
+						" which exists without .ibd data file."
+						" I/O type:pm_batch write "
+						<< ", page: "
+						<< page_id_t(page_id.space(),
+								cur_page_no)
+						<< ", I/O length: " << len << " bytes";
+				}
+
+				return(DB_TABLESPACE_DELETED);
+			}
+			ut_a(0);
+		}
+		/* Check that at least the start offset is within the bounds of a
+		   single-table tablespace, including rollback tablespaces. */
+		if (node->size <= cur_page_no
+				&& space->id != srv_sys_space.space_id()
+				&& fil_type_is_data(space->purpose)) {
+
+			if (req_type.ignore_missing()) {
+				/* If we can tolerate the non-existent pages, we
+				   should return with DB_ERROR and let caller decide
+				   what to do. */
+				fil_node_complete_io(node, fil_system, req_type);
+				mutex_exit(&fil_system->mutex);
+				return(DB_ERROR);
+			}
+
+			fil_report_invalid_page_access(
+					page_id.page_no(), page_id.space(),
+					space->name, byte_offset, len, req_type.is_read());
+		}
+
+		/* Now we have made the changes in the data structures of fil_system */
+		mutex_exit(&fil_system->mutex);
+
+		/* Calculate the low 32 bits and the high 32 bits of the file offset */
+
+		if (!page_size.is_compressed()) {
+
+			offset = ((os_offset_t) cur_page_no
+					<< UNIV_PAGE_SIZE_SHIFT) + byte_offset;
+
+			ut_a(node->size - cur_page_no
+					>= ((byte_offset + len + (UNIV_PAGE_SIZE - 1))
+						/ UNIV_PAGE_SIZE));
+		} else {
+			ulint	size_shift;
+
+			switch (page_size.physical()) {
+				case 1024: size_shift = 10; break;
+				case 2048: size_shift = 11; break;
+				case 4096: size_shift = 12; break;
+				case 8192: size_shift = 13; break;
+				case 16384: size_shift = 14; break;
+				case 32768: size_shift = 15; break;
+				case 65536: size_shift = 16; break;
+				default: ut_error;
+			}
+
+			offset = ((os_offset_t) cur_page_no << size_shift)
+				+ byte_offset;
+
+			ut_a(node->size - cur_page_no
+					>= (len + (page_size.physical() - 1))
+					/ page_size.physical());
+		}
+
+		/* Do AIO */
+
+		ut_a(byte_offset % OS_FILE_LOG_BLOCK_SIZE == 0);
+		ut_a((len % OS_FILE_LOG_BLOCK_SIZE) == 0);
+
+		/* Don't compress the log, page 0 of all tablespaces, tables
+		   compresssed with the old scheme and all pages from the system
+		   tablespace. */
+
+		if (req_type.is_write()
+				&& !req_type.is_log()
+				&& !page_size.is_compressed()
+				&& page_id.page_no() > 0
+				&& IORequest::is_punch_hole_supported()
+				&& node->punch_hole) {
+
+			ut_ad(!req_type.is_log());
+
+			req_type.set_punch_hole();
+
+			req_type.compression_algorithm(space->compression_type);
+
+		} else {
+			req_type.clear_compressed();
+		}
+
+		/* Set encryption information. */
+		fil_io_set_encryption(req_type, page_id, space);
+
+		req_type.block_size(node->block_size);
+
+		//(3)Transfer data from the pblock to the param
+		params[n_params].name = node->name;
+		//we also save the file name for recovery
+		strcpy(pblock->file_name, node->name);
+		params[n_params].file = node->handle;
+		params[n_params].buf = buf;
+		params[n_params].offset = offset;
+		params[n_params].n = len;
+		params[n_params].m1 = node;
+		params[n_params].m2 = message; //message point to pblock
+		++n_params;
+
+		//next entry
+		e = e->next;
+	}//end loop for each entry in the bucket
+
+	if (n_params == 0) {
+		//this inform we are on a all-free-block list
+		printf("PMEM_INFO: logical error, we call flush a free list, list_id %zu cur_pages %zu max_pages %zu, is_flushing %d check again\n",
+				plsb_list->list_id, plsb_list->cur_pages, plsb_list->max_pages, plsb_list->is_flush);
+		assert(0);
+	}
+
+	//(4) Until this point, we have all params ready for io_submit()
+	dberr_t	err;
+	
+	if (n_params != pbucket->n_entries){
+		printf("LSB ERROR: n_params %zu differs from pbucket->n_entries %zu\n", n_params, pbucket->n_entries);
+	}	
+	//pmemobj_rwlock_wrlock(pop, &pmem_lsb->lsb_aio_lock);	
+	//pmem_lsb->n_aio_submitted += n_params;
+	//pmemobj_rwlock_unlock(pop, &pmem_lsb->lsb_aio_lock);	
+
+	//see os_aio_batch_func() and AIO::pm_process_batch in os0file.cc
+	err = os_aio_batch(params, n_params);
+
+	if (err != DB_SUCCESS){
+		printf("PMEM_ERROR: pm_fil_io_batch()list id \n");
+		assert(0);
+	}
+
+	return DB_SUCCESS;
+
+}
+#endif //UNIV_PMEMOBJ_LSB
+
 //This function support to get the file handle from space
 fil_node_t* 
 pm_get_node_from_space(uint32_t space_no) {
@@ -6434,7 +6709,11 @@ fil_aio_wait(
 		#if defined (UNIV_PMEMOBJ_BUF_V2)
 				pm_handle_finished_block_no_free_pool(gb_pmw->pop, gb_pmw->pbuf,  pblock);
 		#elif defined (UNIV_PMEMOBJ_BUF_FLUSHER)
+			#if defined (UNIV_PMEMOBJ_LSB) // case B: LSB implement
+				pm_lsb_handle_finished_block(gb_pmw->pop, gb_pmw->plsb,  pblock);
+			#else // case A: PB-NVM
 				pm_handle_finished_block_with_flusher(gb_pmw->pop, gb_pmw->pbuf,  pblock);
+			#endif //UNIV_PMEMOBJ_LSB
 		#else //the stable version
 				pm_handle_finished_block(gb_pmw->pop, gb_pmw->pbuf,  pblock);
 		#endif
@@ -6692,6 +6971,82 @@ pm_buf_flush_spaces_in_list(
 	ut_free(space_ids);
 
 }
+#if defined (UNIV_PMEMOBJ_LSB)
+/*
+ *This function used in pm_lsb_handle_finished_block
+ When all pages in the lsb list are finished AIO, we reset it. 
+ We call fsync() for all spaces in this list
+ See fil_flush_file_spaces() in fil/fil0fil.cc
+ * */
+void
+pm_lsb_flush_spaces_in_list(
+		void*	pop_in,
+	   	void*	lsb_in,
+	   	void*	pflush_list_in){
+	
+	PMEMobjpool* pop = static_cast<PMEMobjpool*> (pop_in);
+	PMEM_LSB* lsb = static_cast<PMEM_LSB*> (lsb_in);
+	PMEM_BUF_BLOCK_LIST* pflush_list = static_cast<PMEM_BUF_BLOCK_LIST*> (pflush_list_in);
+	PMEM_BUF_BLOCK* pblock;
+
+	ulint		i;	
+	ulint		j;	
+	bool		is_existed;
+	fil_space_t*	space;
+	ulint*		space_ids;
+	ulint		n_space_ids;
+
+	assert(pop);
+	assert(lsb);
+	assert(pflush_list);
+
+	ulint type = IORequest::PM_WRITE;
+	IORequest		req_type(type);
+
+	mutex_enter(&fil_system->mutex);
+	
+	space_ids = static_cast<ulint*> (
+		ut_malloc_nokey(pflush_list->max_pages * sizeof(*space_ids)));
+
+	n_space_ids = 0;	
+/*[TODO] This approach is O(n^2) expensive	
+ * If pages in the list is sorted by space_ids than the cost is only O(n)
+ * */
+	for (i = 0; i < pflush_list->max_pages; i++) {
+		pblock = D_RW(D_RW(pflush_list->arr)[i]);
+
+		ulint space_id = pblock->id.space();
+		space =fil_space_get_by_id(space_id);
+		
+		//scan for existed space_ids in the list
+		is_existed = false;
+		for (j = 0; j < n_space_ids; j++){
+			if (space_ids[j] == space_id){
+				is_existed = true;
+				break;
+			}
+		}	
+
+		if (is_existed)
+			continue;
+
+		if (space->purpose == FIL_TYPE_TABLESPACE &&
+		     !space->stop_new_ops &&
+			 !space->is_being_truncated) {
+
+			space_ids[n_space_ids++] = space_id;	
+		}
+	}
+
+	mutex_exit(&fil_system->mutex);
+
+	for (ulint i = 0; i < n_space_ids; i++) {
+		fil_flush(space_ids[i]);
+	}
+	ut_free(space_ids);
+
+}
+#endif //UNIV_PMEMOBJ_LSB
 #endif 
 /** Flush to disk the writes in file spaces of the given type
 possibly cached by the OS.

@@ -1240,6 +1240,19 @@ pm_buf_flush_spaces_in_list(
 		void* pop_in,
 	   	void* buf_in,
 	   	void* flush_list_in);
+#if defined (UNIV_PMEMOBJ_LSB)
+dberr_t
+pm_lsb_fil_io_batch(
+		const IORequest&	type,
+		void*				pop_in,
+		void*				pmem_lsb_in,
+		void*				pbucket_in);
+void
+pm_lsb_flush_spaces_in_list(
+		void* pop_in,
+	   	void* lsb_in,
+	   	void* flush_list_in);
+#endif //UNIV_PMEMOBJ_LSB
 
 //This function support to get the file handle from space
 fil_node_t* 

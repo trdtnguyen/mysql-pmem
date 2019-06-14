@@ -1942,10 +1942,15 @@ innobase_start_or_create_for_mysql(void)
 
 #if defined (UNIV_PMEMOBJ_BUF)
 	size_t buf_size = srv_pmem_buf_size * 1024 * 1024;
+#if defined (UNIV_PMEMOBJ_LSB)
+	pm_wrapper_lsb_alloc_or_open(gb_pmw,
+							     buf_size,
+								 UNIV_PAGE_SIZE);
+#else
 	pm_wrapper_buf_alloc_or_open(gb_pmw,
 							     buf_size,
 								 UNIV_PAGE_SIZE);
-	
+#endif	
 	//[TODO] Recovery handler
 #endif /* UNIV_PMEMOBJ_BUF */
 
@@ -1980,7 +1985,12 @@ innobase_start_or_create_for_mysql(void)
 		os_thread_sleep(10000);
 	}
 #if defined (UNIV_PMEMOBJ_BUF) 
+#if defined (UNIV_PMEMOBJ_LSB)
 	os_thread_create(pm_buf_flush_list_cleaner_coordinator, NULL, NULL);
+#else
+	os_thread_create(pm_buf_flush_list_cleaner_coordinator, NULL, NULL);
+#endif //UNIV_PMEMOBJ_LSB
+
 #if defined (UNIV_PMEMOBJ_BUF_FLUSHER)
 	//os_thread_create(pm_flusher_coordinator, NULL, NULL);
 	printf("PMEM_INFO: ========>   create %d worker threads for pm\n", srv_pmem_n_flush_threads);
@@ -2857,7 +2867,6 @@ innobase_shutdown_for_mysql(void)
 	the tablespace header(s), and copy all log data to archive.
 	The step 1 is the real InnoDB shutdown. The remaining steps 2 - ...
 	just free data structures after the shutdown. */
-
 	logs_empty_and_mark_files_at_shutdown();
 
 	if (srv_conc_get_active_threads() != 0) {

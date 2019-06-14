@@ -2,7 +2,7 @@
  * Author; Trong-Dat Nguyen
  * MySQL REDO log with NVDIMM
  * Using libpmemobj
- * Copyright (c) 2017 VLDB Lab - Sungkyunkwan University
+ * Copyright (c) 2018 VLDB Lab - Sungkyunkwan University
  * */
 
 #include <stdio.h>
@@ -180,7 +180,7 @@ pm_wrapper_buf_alloc_or_open(
 #endif	
 #if defined(UNIV_PMEMOBJ_BUF_FLUSHER)
 	//init threads for handle flushing, implement in buf0flu.cc
-	pm_flusher_init(pmw->pbuf, PMEM_N_FLUSH_THREADS);
+	pmw->pbuf->flusher = pm_flusher_init(PMEM_N_FLUSH_THREADS);
 #endif 
 #if defined (UNIV_PMEMOBJ_BUF_PARTITION_STAT)
 	pm_filemap_init(pmw->pbuf);
@@ -282,7 +282,7 @@ void pm_wrapper_buf_close(PMEM_WRAPPER* pmw) {
 	free(pmw->pbuf->param_arrs);
 #if defined (UNIV_PMEMOBJ_BUF_FLUSHER)
 	//Free the flusher
-	pm_buf_flusher_close(pmw->pbuf);
+	pm_buf_flusher_close(pmw->pbuf->flusher);
 #endif 
 
 	fclose(pmw->pbuf->deb_file);
@@ -295,12 +295,12 @@ pm_wrapper_buf_alloc(
 		const size_t		page_size)
 {
 	assert(pmw);
-
 	pmw->pbuf = pm_pop_buf_alloc(pmw->pop, size, page_size);
 	if (!pmw->pbuf)
 		return PMEM_ERROR;
 	else
 		return PMEM_SUCCESS;
+
 }
 /*
  * Allocate new log buffer in persistent memory and assign to the pointer in the wrapper
@@ -554,6 +554,7 @@ pm_buf_lists_init(
 	pm_buf_single_list_init(pop, buf->spec_list, offset, args, n_pages_per_bucket, page_size);
 	
 }
+
 
 /*
  * Allocate and init blocks in a PMEM_BUF_BLOCK_LIST
@@ -2593,8 +2594,6 @@ assign_worker:
 			++flusher->n_requested;
 			//delay calling flush up to a threshold
 			//printf("trigger worker...\n");
-			//if (flusher->n_requested == flusher->size - 2) {
-			//if (flusher->n_requested == PMEM_FLUSHER_WAKE_THRESHOLD) {
 			if (flusher->n_requested >= PMEM_FLUSHER_WAKE_THRESHOLD) {
 #if defined (UNIV_PMEMOBJ_BUF_RECOVERY_DEBUG)
 			printf("\n in [1.1] try to trigger flusher list_id = %zu\n", phashlist->list_id);
@@ -2662,7 +2661,722 @@ pm_filemap_init(
 
 //						END OF PARTITION//////////////////////
 
+////////////////////////// Log-structure Buffer Implementation //////////////////
+#if defined (UNIV_PMEMOBJ_LSB)
+void
+pm_wrapper_lsb_alloc_or_open(
+		PMEM_WRAPPER*		pmw,
+		const size_t		buf_size,
+		const size_t		page_size)
+{
 
+	uint64_t i;
+	char sbuf[256];
+
+	PMEM_N_BUCKETS = srv_pmem_buf_n_buckets;
+	PMEM_BUCKET_SIZE = srv_pmem_buf_bucket_size;
+	PMEM_BUF_FLUSH_PCT = srv_pmem_buf_flush_pct;
+	PMEM_N_FLUSH_THREADS= srv_pmem_n_flush_threads;
+	PMEM_FLUSHER_WAKE_THRESHOLD = srv_pmem_flush_threshold;
+
+	/////////////////////////////////////////////////
+	// PART 1: NVM structures
+	// ///////////////////////////////////////////////
+	if (!pmw->plsb) {
+		//Case 1: Alocate new buffer in PMEM
+			printf("PMEMOBJ_INFO: allocate %zd MB of buffer in pmem\n", buf_size);
+
+		if ( pm_wrapper_lsb_alloc(pmw, buf_size, page_size) == PMEM_ERROR ) {
+			printf("PMEMOBJ_ERROR: error when allocate buffer in buf_dblwr_init()\n");
+		}
+	}
+	else {
+		//Case 2: Reused a buffer in PMEM
+		printf("!!!!!!! [PMEMOBJ_INFO]: the server restart from a crash but the buffer is persist, in pmem: size = %zd \n", 
+				pmw->plsb->size);
+		//Check the page_size of the previous run with current run
+		if (pmw->plsb->page_size != page_size) {
+			printf("PMEM_ERROR: the pmem buffer size = %zu is different with UNIV_PAGE_SIZE = %zu, you must use the same page_size!!!\n ",
+					pmw->plsb->page_size, page_size);
+			assert(0);
+		}
+			
+		//We need to re-align the p_align
+		byte* p;
+		p = static_cast<byte*> (pmemobj_direct(pmw->plsb->data));
+		assert(p);
+		pmw->plsb->p_align = static_cast<byte*> (ut_align(p, page_size));
+	}
+	////////////////////////////////////////////////////
+	// Part 2: D-RAM structures and open file(s)
+	// ///////////////////////////////////////////////////
+	
+	//init threads for handle flushing, implement in buf0flu.cc, each thread handle one bucket
+	//pmw->plsb->flusher = pm_flusher_init(PMEM_N_FLUSH_THREADS);
+	pmw->plsb->flusher = pm_flusher_init(PMEM_N_BUCKETS);
+
+	//In any case (new allocation or resued, we should allocate the flush_events for buckets in DRAM
+	pmw->plsb->flush_events = (os_event_t*) calloc(PMEM_N_BUCKETS, sizeof(os_event_t));
+
+	for ( i = 0; i < PMEM_N_BUCKETS; i++) {
+		sprintf(sbuf,"pm_flush_bucket%zu", i);
+		pmw->plsb->flush_events[i] = os_event_create(sbuf);
+	}
+
+	/*Alocate the param array
+	 */
+	PMEM_BUF_BLOCK_LIST* plist;
+	ulint arr_size = 2 * PMEM_N_BUCKETS;
+	ulint max_bucket_size = buf_size / page_size; 
+
+	pmw->plsb->param_arr_size = arr_size;
+	pmw->plsb->param_arrs = static_cast<PMEM_AIO_PARAM_ARRAY*> (
+		calloc(arr_size, sizeof(PMEM_AIO_PARAM_ARRAY)));	
+	for ( i = 0; i < arr_size; i++) {
+		//plist = D_RW(D_RW(pmw->pbuf->buckets)[i]);
+
+		pmw->plsb->param_arrs[i].params = static_cast<PMEM_AIO_PARAM*> (
+				//the worse case is one bucket has all pages in lsb list, alloc the size to max_bucket_size
+				calloc(max_bucket_size, sizeof(PMEM_AIO_PARAM)));
+		pmw->plsb->param_arrs[i].is_free = true;
+	}
+	pmw->plsb->cur_free_param = 0; //start with the 0
+	
+}
+
+/*
+ * CLose/deallocate resource in DRAM
+ * */
+void pm_wrapper_lsb_close(PMEM_WRAPPER* pmw) {
+	uint64_t i;
+	
+	os_event_destroy(pmw->plsb->all_aio_finished);
+
+	for ( i = 0; i < PMEM_N_BUCKETS; i++) {
+		os_event_destroy(pmw->plsb->flush_events[i]); 
+	}
+	free(pmw->plsb->flush_events);
+
+	//Free the param array
+	for ( i = 0; i < PMEM_N_BUCKETS; i++) {
+		//free(pmw->pbuf->params_arr[i]);
+		free(pmw->plsb->param_arrs[i].params);
+	}
+	//free(pmw->pbuf->params_arr);
+	free(pmw->plsb->param_arrs);
+	//Free the flusher
+	pm_buf_flusher_close(pmw->plsb->flusher);
+}
+
+int
+pm_wrapper_lsb_alloc(
+		PMEM_WRAPPER*		pmw,
+	    const size_t		size,
+		const size_t		page_size)
+{
+	assert(pmw);
+	pmw->plsb = pm_pop_lsb_alloc(pmw->pop, size, page_size);
+	if (!pmw->plsb)
+		return PMEM_ERROR;
+	else
+		return PMEM_SUCCESS;
+
+}
+/*
+ * Allocate LSB in persistent memory and assign to the pointer in the wrapper
+ * This function only allocate structures that in NVM
+ * Structures in D-RAM are allocated outside in pm_wrapper_buf_alloc_or_open() function
+ * */
+PMEM_LSB* 
+pm_pop_lsb_alloc(
+		PMEMobjpool*		pop,
+		const size_t		size,
+		const size_t		page_size)
+{
+	char* p;
+	size_t align_size;
+
+	//(1) allocate in PMEM
+	TOID(PMEM_LSB) lsb; 
+
+	POBJ_ZNEW(pop, &lsb, PMEM_LSB);
+
+	PMEM_LSB *plsb = D_RW(lsb);
+	//align sizes to a pow of 2
+	assert(ut_is_2pow(page_size));
+	align_size = ut_uint64_align_up(size, page_size);
+
+
+	plsb->size = align_size;
+	plsb->page_size = page_size;
+	plsb->type = BUF_TYPE;
+	plsb->is_new = true;
+
+	plsb->all_aio_finished = os_event_create("lsb_all_aio_finished");
+
+	plsb->data = pm_pop_alloc_bytes(pop, align_size);
+	//align the pmem address for DIRECT_IO
+	p = static_cast<char*> (pmemobj_direct(plsb->data));
+	assert(p);
+	//pbuf->p_align = static_cast<char*> (ut_align(p, page_size));
+	plsb->p_align = static_cast<byte*> (ut_align(p, page_size));
+	pmemobj_persist(pop, plsb->p_align, sizeof(*plsb->p_align));
+
+	if (OID_IS_NULL(plsb->data)){
+		//assert(0);
+		return NULL;
+	}
+	//(2) init the list
+	pm_lsb_lists_init(pop, plsb, align_size, page_size);
+	pmemobj_persist(pop, plsb, sizeof(*plsb));
+
+	//(3) init the hashtable
+	pm_lsb_hashtable_init(pop, plsb, PMEM_N_BUCKETS);
+	
+	return plsb;
+} 
+/*
+ * Init in-PMEM lists
+ * centralized LSB lists
+ * */
+void 
+pm_lsb_lists_init(
+		PMEMobjpool*	pop,
+		PMEM_LSB*		lsb, 
+		const size_t	total_size,
+	   	const size_t	page_size)
+{
+	uint64_t i;
+	uint64_t j;
+	size_t offset;
+	PMEM_BUF_BLOCK_LIST* plist;
+	page_size_t page_size_obj(page_size, page_size, false);
+
+
+	size_t n_pages = (total_size / page_size);
+
+
+	//Don't reset those variables during the init
+	offset = 0;
+
+	//init the temp args struct
+	struct list_constr_args* args = (struct list_constr_args*) malloc(sizeof(struct list_constr_args)); 
+	args->size.copy_from(page_size_obj);
+	args->check = PMEM_AIO_CHECK;
+	args->state = PMEM_FREE_BLOCK;
+	TOID_ASSIGN(args->list, OID_NULL);
+
+	//(1) Init the buckets
+
+	//init the list
+	POBJ_ZNEW(pop, &lsb->lsb_list, PMEM_BUF_BLOCK_LIST);	
+	if(TOID_IS_NULL(lsb->lsb_list)) {
+		fprintf(stderr, "POBJ_ZNEW\n");
+		assert(0);
+	}
+	plist = D_RW(lsb->lsb_list);
+
+	//pmemobj_rwlock_wrlock(pop, &plist->lock);
+
+	plist->cur_pages = 0;
+	plist->is_flush = false;
+	plist->n_aio_pending = 0;
+	plist->n_sio_pending = 0;
+	plist->max_pages = n_pages;
+	plist->list_id = 0;
+	plist->hashed_id = 0;
+	plist->check = PMEM_AIO_CHECK;
+	TOID_ASSIGN(plist->next_list, OID_NULL);
+	TOID_ASSIGN(plist->prev_list, OID_NULL);
+
+	//init pages in bucket
+	pm_buf_single_list_init(pop, lsb->lsb_list, offset, args, n_pages, page_size);
+
+	
+}
+/*
+ *Init the hashtable
+ * */
+void
+pm_lsb_hashtable_init(
+		PMEMobjpool*	pop,
+		PMEM_LSB*		lsb, 
+		const size_t	n_buckets){
+
+	ulint i;
+	PMEM_LSB_HASHTABLE* pht;
+
+	POBJ_ZNEW(pop, &lsb->ht, PMEM_LSB_HASHTABLE);	
+	pht = D_RW(lsb->ht);
+
+	pht->n_buckets = n_buckets;
+	pht->buckets = (PMEM_LSB_HASH_BUCKET*) calloc(n_buckets, sizeof(PMEM_LSB_HASH_BUCKET));
+	
+	//init buckets
+	for (i = 0; i < n_buckets; ++i){
+		PMEM_LSB_HASH_BUCKET b = pht->buckets[i];
+		b.head = b.tail = NULL;
+		b.n_entries = 0;
+	}
+
+}
+
+void
+pm_lsb_hashtable_free(
+		PMEMobjpool*	pop,
+		PMEM_LSB*		lsb) {
+	
+	PMEM_LSB_HASHTABLE* pht = D_RW(lsb->ht);
+	
+	pm_lsb_hashtable_reset(pop, lsb);
+	free(pht->buckets);
+}
+
+void
+pm_lsb_hashtable_reset(
+		PMEMobjpool*	pop,
+		PMEM_LSB*		lsb) {
+
+	ulint i;	
+	PMEM_LSB_HASH_ENTRY* e;
+	PMEM_LSB_HASH_ENTRY* prev;
+	PMEM_LSB_HASHTABLE* pht = D_RW(lsb->ht);
+	PMEM_LSB_HASH_BUCKET* pbucket;
+	
+	for (i = 0; i < pht->n_buckets; ++i){
+		pbucket = &pht->buckets[i];
+		
+		//we need the lock here, read thread may access	
+		pmemobj_rwlock_wrlock(pop, &pbucket->lock);
+		//reset each bucket
+		e = pbucket->head;
+		while (e != NULL){
+			prev = e;
+			e = e->next;	
+			prev->next = NULL;
+			prev->prev=NULL;
+			free(prev);
+			prev = NULL;
+		}
+		pbucket->head = pht->buckets[i].tail = NULL;
+		pbucket->n_entries = 0;
+		pmemobj_rwlock_unlock(pop, &pbucket->lock);
+	}
+
+}
+/*
+ * Add an entry in hashtable
+ * The caller response for allocate the entry
+ * The caller must acquire the lsb_list lock
+ * */
+
+int 
+pm_lsb_hashtable_add_entry(
+		PMEMobjpool*			pop,
+		PMEM_LSB*				lsb,
+		PMEM_LSB_HASH_ENTRY*	entry){
+
+	ulint hashed;
+	PMEM_LSB_HASHTABLE* pht = D_RW(lsb->ht);
+	PMEM_LSB_HASH_BUCKET* bucket;
+	PMEM_LSB_HASH_ENTRY* e;
+	PMEM_LSB_HASH_ENTRY* tem;
+
+	PMEM_BUF_BLOCK_LIST* plist = D_RW(lsb->lsb_list);
+	
+	PMEM_HASH_KEY(hashed, entry->id.fold(), pht->n_buckets);
+	bucket = &(pht->buckets[hashed]);
+	
+	//we need the lock here, read thread may access the bucket	
+	pmemobj_rwlock_wrlock(pop, &bucket->lock);
+	int hole_id = -1;
+
+	e = bucket->head;
+
+	//(1) On-the-fly reclaiming the duplicated page
+	while (e != NULL){
+		if (e->id.equals_to(entry->id)){
+			hole_id = e->lsb_entry_id;
+			//Remove the entry in hashtable
+			if (e->prev == NULL){
+				//The head entry
+				bucket->head = e->next;
+				if (e->next != NULL)
+					e->next->prev = NULL;
+			}
+			else if (e->next == NULL){
+				bucket->tail = e->prev;
+				e->prev->next = NULL;
+			}
+			else {
+				tem = e->prev;
+				tem->next = e->next;
+				e->next->prev = tem;	
+			}
+			e->prev = NULL;
+			e->next = NULL;
+			free(e);
+			e = NULL;
+			--bucket->n_entries;
+			break;
+		}
+		e = e->next;
+	}
+
+	//(2) Add the entry in the hashtable
+	if (bucket->n_entries == 0){
+		bucket->head = bucket->tail = entry;
+	}
+	else {
+		//add to the tail of the bucket
+		bucket->tail->next = entry;
+		entry->prev = bucket->tail;
+		bucket->tail = entry;
+	}	
+	++bucket->n_entries;
+	pmemobj_rwlock_unlock(pop, &bucket->lock);
+
+	return hole_id;
+}
+
+PMEM_LSB_HASH_ENTRY*
+pm_lsb_hashtable_search_entry(
+		PMEMobjpool*			pop,
+		PMEM_LSB*				lsb,
+		PMEM_LSB_HASH_ENTRY*	entry){
+
+	PMEM_LSB_HASH_ENTRY* ret_entry = NULL;
+
+	ulint hashed;
+	PMEM_LSB_HASHTABLE* pht = D_RW(lsb->ht);
+	PMEM_LSB_HASH_BUCKET* bucket;
+	PMEM_LSB_HASH_ENTRY* e;
+	PMEM_LSB_HASH_ENTRY* tem;
+	
+	PMEM_HASH_KEY(hashed, entry->id.fold(), pht->n_buckets);
+	bucket = &(pht->buckets[hashed]);
+	
+	e = bucket->head;
+	while (e != NULL){
+		if (e->id.equals_to(entry->id)){
+			ret_entry = e;
+			break;
+		}
+		e = e->next;
+	}
+	return ret_entry;
+}
+
+int
+pm_lsb_write(
+			PMEMobjpool*	pop,
+		   	PMEM_LSB*		lsb,
+		   	page_id_t		page_id,
+		   	page_size_t		size,
+		   	byte*			src_data,
+		   	bool			sync) 
+{
+
+	ulint hashed;
+	ulint i, i_free;
+
+	PMEM_BUF_BLOCK_LIST* plist;
+
+	TOID(PMEM_BUF_BLOCK) free_block;
+	PMEM_BUF_BLOCK* pfree_block;
+	PMEM_BUF_BLOCK* pblock;
+
+	byte* pdata;
+	//page_id_t page_id;
+	size_t page_size;
+
+	assert(lsb);
+	assert(src_data);
+
+	plist = D_RW(lsb->lsb_list);
+
+	page_size = size.physical();
+
+try_again:
+	//acquire lock
+	pmemobj_rwlock_wrlock(pop, &lsb->lsb_lock);
+	if (plist->cur_pages >= plist->max_pages && plist->is_flush){
+		
+		pmemobj_rwlock_unlock(pop, &lsb->lsb_lock);
+		os_event_wait(lsb->all_aio_finished);
+		goto try_again;
+	}	
+	//(1) Search the first free slot in the lsb list
+	for (i = 0; i < plist->max_pages; ++i){
+		pblock = D_RW(D_RW(plist->arr)[i]);
+		if (pblock->state == PMEM_FREE_BLOCK) {
+			pfree_block = pblock;
+			i_free = i;
+			break;
+		}
+	}
+	assert(i < plist->max_pages);
+	//(2) Add data to the free block in lsb list
+	pdata = lsb->p_align;
+
+	fil_node_t*			node;
+	node = pm_get_node_from_space(page_id.space());
+	strcpy(pfree_block->file_name, node->name);
+
+	pfree_block->sync = sync;
+	pfree_block->id.copy_from(page_id);
+
+	assert(pfree_block->size.equals_to(size));
+
+	pfree_block->state = PMEM_IN_USED_BLOCK;
+
+TX_BEGIN(pop) {
+	pmemobj_memcpy_persist(pop, pdata + pfree_block->pmemaddr, src_data, page_size); 
+}TX_ONABORT {
+
+}TX_END
+
+	++plist->cur_pages;
+	// (3) Add a corresponding entry in the hashtable
+	PMEM_LSB_HASH_ENTRY* e = (PMEM_LSB_HASH_ENTRY*) malloc(sizeof(PMEM_LSB_HASH_ENTRY));
+	strcpy(e->file_name, node->name);
+	e->id.copy_from(page_id);
+	e->size = page_size;
+	//save the id of the list entry, use this for making the hole in reclaiming process
+	e->lsb_entry_id = i_free;
+	e->next = e->prev = NULL;	
+	//add entry in the hashtable, if the entry with page_id exist, remove it and set the corresponding page in lsb list as a hole	
+	
+	int hole_id = pm_lsb_hashtable_add_entry(pop, lsb, e);
+	if (hole_id >= 0){
+		//Set the hole in the lsb list
+		PMEM_BUF_BLOCK* phole_block = D_RW(D_RW(plist->arr)[hole_id]);
+		phole_block->state = PMEM_FREE_BLOCK;
+#if defined (UNIV_PMEMOBJ_LSB_DEBUG)
+		printf("LSB: reclaim exist page at %d, cur_pages / max_pages %zu/%zu \n", hole_id, plist->cur_pages, plist->max_pages);
+#endif
+		--plist->cur_pages;
+	}
+	
+	if (plist->cur_pages >= plist->max_pages - 2){
+#if defined (UNIV_PMEMOBJ_LSB_DEBUG)
+		printf("LSB [1] pm_lsb_write the lsb list is full\n");
+#endif
+		//handle full lsb list
+		plist->is_flush = true;
+		os_event_reset(lsb->all_aio_finished);
+
+		pm_lsb_assign_flusher(lsb);
+#if defined (UNIV_PMEMOBJ_LSB_DEBUG)
+		printf("LSB [4] pm_lsb_write finish assign flusher threads\n");
+#endif
+		//wait for AIO finish
+		os_event_wait(lsb->all_aio_finished);
+		//now all aio finished
+		plist->is_flush = false;
+#if defined (UNIV_PMEMOBJ_LSB_DEBUG)
+		printf("LSB [6] pm_lsb_write wake from sleep.\n");
+#endif
+	}
+
+	pmemobj_rwlock_unlock(pop, &lsb->lsb_lock);
+
+	return PMEM_SUCCESS;
+}
+
+/*
+ * Assign flusher to each bucket in the lsb list
+ * */
+void
+pm_lsb_assign_flusher(
+		PMEM_LSB*				lsb)
+{
+	ulint i;
+	ulint n_pages = 0; //n_pages to the flusher
+
+	PMEM_FLUSHER* flusher = lsb->flusher;
+	PMEM_LSB_HASHTABLE* pht = D_RW(lsb->ht);
+	PMEM_LSB_HASH_BUCKET* pbucket;
+
+	mutex_enter(&flusher->mutex);
+	//For simple implementation, supose the flusher has enough entry to handle all buckets in the lsb list
+	assert(flusher->size >= pht->n_buckets);
+	
+	//this value is set 0 here and increase in pm_lsb_handle_finished_block() in buf0flu.cc	
+	lsb->n_aio_submitted = lsb->n_aio_completed = 0;
+
+	flusher->n_requested = 0;
+
+	for (i = 0; i < pht->n_buckets; ++i) {
+		pbucket = &pht->buckets[i];
+		//skip empty bucket
+		if (pbucket->n_entries == 0){
+#if defined(UNIV_PMEMOBJ_LSB_DEBUG)
+			printf("LSB ==> bucket %zu has no entry, skip it! \n", i);
+#endif
+			continue;
+		}
+
+		flusher->bucket_arr[flusher->n_requested] = pbucket;
+		++flusher->n_requested;
+		n_pages += pbucket->n_entries;
+	}
+	//trigger the worker thread
+#if defined(UNIV_PMEMOBJ_LSB_DEBUG)
+	printf("LSB [2] Before call flusher worker, n_requests %zu n_pages %zu \n", flusher->n_requested, n_pages);
+#endif
+	os_event_set(flusher->is_req_not_empty);
+	//os_event_reset(flusher->is_req_full);
+
+	mutex_exit(&flusher->mutex);
+}
+/*
+ * Propagate all pages in the bucket using batch AIO
+ * (one io_submit() for all pages)
+ * */
+void
+pm_lsb_flush_bucket_batch(
+		PMEMobjpool*			pop,
+	   	PMEM_LSB*				lsb,
+	   	PMEM_LSB_HASH_BUCKET*	pbucket) {
+
+	assert(pop);
+	assert(lsb);
+
+#if defined (UNIV_PMEMOBJ_BUF)
+		ulint type = IORequest::PM_WRITE;
+#else
+		ulint type = IORequest::WRITE;
+#endif
+		IORequest request(type);
+		//pm_fil_io_batch() defined in fil0fil.h and implemented in fil0fil.cc
+		dberr_t err = pm_lsb_fil_io_batch(request, pop, lsb, pbucket);
+		
+}
+/*
+ * Propagate each page in the bucket using normal AIO (one io_submit() for one page)
+ * */
+void
+pm_lsb_flush_bucket(
+		PMEMobjpool*			pop,
+		PMEM_LSB*				lsb,
+		PMEM_LSB_HASH_BUCKET*	pbucket) {
+
+	assert(pop);
+	assert(lsb);
+	ulint count;
+
+#if defined (UNIV_PMEMOBJ_BUF)
+	ulint type = IORequest::PM_WRITE;
+#else
+	ulint type = IORequest::WRITE;
+#endif
+	IORequest request(type);
+
+	PMEM_BUF_BLOCK* pblock;
+	PMEM_BUF_BLOCK_LIST* plsb_list;
+	byte* pdata;
+	PMEM_LSB_HASH_ENTRY* e;
+
+	pdata = lsb->p_align;
+	plsb_list = D_RW(lsb->lsb_list);
+	
+	count = 0;
+	e = pbucket->head;
+	while (e != NULL){
+		//Get the corresponding pblock with this hashtable entry
+		int id = e->lsb_entry_id;
+		assert(id >= 0 && id < plsb_list->max_pages);
+
+		pblock = D_RW(D_RW(plsb_list->arr)[id]);
+		assert(pblock);
+
+		if (pblock->state == PMEM_FREE_BLOCK) {
+			printf("====> LSB skip the free block in pm_lsb_fil_io_batch \n ");
+			e = e->next;
+			continue;
+		}
+		pblock->state = PMEM_IN_FLUSH_BLOCK;	
+		dberr_t err = fil_io(request, 
+			false, pblock->id, pblock->size, 0, pblock->size.physical(),
+			pdata + pblock->pmemaddr, pblock);
+		if (err != DB_SUCCESS){
+			printf("PMEM_ERROR: fil_io() in pm_buf_list_write_to_datafile() space_id = %"PRIu32" page_id = %"PRIu32" size = %zu \n ", pblock->id.space(), pblock->id.page_no(), pblock->size.physical());
+			assert(0);
+		}
+
+		++count;
+		if (count >= pbucket->n_entries)
+			break;
+		e = e->next;
+
+	}//end while for each page in the bucket
+
+}
+/*
+ * Read a page from the LSB using page_id as key
+ * Searching in the hashtable, get the corresponding block in case the block is found
+ * */
+const PMEM_BUF_BLOCK* 
+pm_lsb_read(
+		PMEMobjpool*		pop,
+	   	PMEM_LSB*			lsb,
+	   	const page_id_t		page_id,
+	   	const page_size_t	size,
+	   	byte*				data, 
+		bool				sync)
+{
+	ulint hashed;
+	ulint count;
+	int lsb_id;
+	byte* pdata;
+	
+	bool is_lock_bucket = true;
+
+	PMEM_LSB_HASH_BUCKET* pbucket;
+	
+	PMEM_HASH_KEY(hashed, page_id.fold(), PMEM_N_BUCKETS);
+	pbucket = &(D_RW(lsb->ht))->buckets[hashed];
+	assert(pbucket);
+
+	//We need the lock here, write thread may modify the bucket
+	if(is_lock_bucket)
+		pmemobj_rwlock_rdlock(pop, &pbucket->lock);
+
+	pdata = lsb->p_align;
+	count = 0;
+	
+	//search in the hashtable	
+	PMEM_LSB_HASH_ENTRY* e = pbucket->head;
+	while (e != NULL){
+		if (e->id.equals_to(page_id)){
+			//found, get the corresponding block in the lsb list
+			lsb_id = e->lsb_entry_id;
+			const PMEM_BUF_BLOCK* pblock = D_RO(D_RO(D_RO(lsb->lsb_list)->arr)[lsb_id]);
+			
+			assert(pblock);
+			assert(pblock->size.physical() == size.physical());
+			memcpy(data, pdata + pblock->pmemaddr, pblock->size.physical()); 
+
+			if(is_lock_bucket)
+				pmemobj_rwlock_unlock(pop, &pbucket->lock);
+			return pblock;
+		}
+		e = e->next;
+		++count;
+		if (count >= pbucket->n_entries){
+			break;
+		}
+	}//end while
+
+	//not found
+	if(is_lock_bucket)
+		pmemobj_rwlock_unlock(pop, &pbucket->lock);
+	return NULL;
+}
+
+
+#endif //UNIV_PMEMOBJ_LSB
 //////////////////////// STATISTICS FUNCTS/////////////////////
 
 #if defined (UNIV_PMEMOBJ_BUF_STAT)

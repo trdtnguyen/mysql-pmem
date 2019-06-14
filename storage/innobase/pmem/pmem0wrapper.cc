@@ -125,9 +125,16 @@ err:
  * */
 void pm_wrapper_free(PMEM_WRAPPER* pmw){
 #if defined (UNIV_PMEMOBJ_BUF)
+
+#if defined (UNIV_PMEMOBJ_LSB)
+	pm_wrapper_lsb_close(pmw);
+	pm_lsb_hashtable_free(pmw->pop, pmw->plsb);
+#else
 	//PMEM buf
 	pm_wrapper_buf_close(pmw);
 	pmw->pbuf = NULL;
+#endif
+
 #endif 
 
 	if(pmw->pop)
