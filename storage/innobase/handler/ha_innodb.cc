@@ -3706,6 +3706,12 @@ innobase_init(
 		srv_aio_n_slots_per_seg = 256;
 	}
 #endif
+#if defined (UNIV_PMEM_SIM_LATENCY)
+	if (!srv_pmem_sim_latency) {
+		srv_pmem_sim_latency = 1000; //1 micro second
+	}
+#endif
+
 #if defined(UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_WAL)
 	if (!srv_pmem_home_dir) {
 		srv_pmem_home_dir = (char*) "/mnt/pmem1";
@@ -19552,6 +19558,13 @@ static MYSQL_SYSVAR_DOUBLE(pmem_buf_flush_pct, srv_pmem_buf_flush_pct,
   NULL, NULL, 0.9, 0.1, 1,0);
 #endif
 
+#if defined (UNIV_PMEM_SIM_LATENCY)
+static MYSQL_SYSVAR_ULONG(pmem_sim_latency, srv_pmem_sim_latency,
+  PLUGIN_VAR_RQCMDARG | PLUGIN_VAR_READONLY,
+  "Additional latency in nanoseconds, from 1 to MAX_LONG, default 1000 (1 us).",
+  NULL, NULL, 1000, 1, 10000000, 0);
+#endif
+
 static MYSQL_SYSVAR_STR(log_group_home_dir, srv_log_group_home_dir,
   PLUGIN_VAR_RQCMDARG | PLUGIN_VAR_READONLY,
   "Path to InnoDB log files.", NULL, NULL, NULL);
@@ -20362,17 +20375,21 @@ static struct st_mysql_sys_var* innobase_system_variables[]= {
 #if defined(UNIV_AIO_IMPROVE)
   MYSQL_SYSVAR(aio_n_slots_per_seg),
 #endif
+
 #if defined (UNIV_PMEMOBJ_BUF)
   MYSQL_SYSVAR(pmem_buf_bucket_size),
 #endif
+
 #if defined (UNIV_PMEMOBJ_BUF_FLUSHER)
   MYSQL_SYSVAR(pmem_n_flush_threads),
   MYSQL_SYSVAR(pmem_flush_threshold),
 #endif 
+
 #if defined (UNIV_PMEMOBJ_BUF_PARTITION)
   MYSQL_SYSVAR(pmem_n_space_bits),
   MYSQL_SYSVAR(pmem_page_per_bucket_bits),
 #endif
+
 #if defined (UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_WAL)
   MYSQL_SYSVAR(pmem_home_dir),
   MYSQL_SYSVAR(pmem_pool_size),
@@ -20380,6 +20397,11 @@ static struct st_mysql_sys_var* innobase_system_variables[]= {
   MYSQL_SYSVAR(pmem_buf_n_buckets),
   MYSQL_SYSVAR(pmem_buf_flush_pct),
 #endif
+
+#if defined (UNIV_PMEM_SIM_LATENCY)
+  MYSQL_SYSVAR(pmem_sim_latency),
+#endif
+
   MYSQL_SYSVAR(log_group_home_dir),
   MYSQL_SYSVAR(log_compressed_pages),
   MYSQL_SYSVAR(max_dirty_pages_pct),

@@ -108,6 +108,10 @@ struct __pmem_wrapper {
 	PMEM_BUF* pbuf;
 #endif
 	bool is_new;
+/*global const*/
+#if defined (UNIV_PMEM_SIM_LATENCY)
+	uint64_t PMEM_SIM_CPU_CYCLES;
+#endif
 };
 
 
@@ -196,6 +200,15 @@ ssize_t  pm_wrapper_dbw_io(PMEM_WRAPPER* pmw,
 							unsigned long int n);
 
 /////// PMEM BUF  //////////////////////
+#if defined (UNIV_PMEM_SIM_LATENCY)
+#define PMEM_DELAY(start, end, t) do {\
+	start = my_timer_cycles();\
+	end = start;\
+	while( (end - start) < t)\
+		end = my_timer_cycles();\
+} while(0)
+#endif
+
 #if defined (UNIV_PMEMOBJ_BUF)
 //This struct is used only for POBJ_LIST_INSERT_NEW_HEAD
 //modify this struct according to struct __pmem_buf_block_t

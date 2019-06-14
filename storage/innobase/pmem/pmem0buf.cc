@@ -22,6 +22,18 @@
 #include "os0file.h"
 #include "buf0dblwr.h"
 
+#if defined (UNIV_PMEM_SIM_LATENCY)
+#include "my_rdtsc.h" //for my_timer_cycles()
+#endif
+
+#if defined (UNIV_PMEM_SIM_LATENCY)
+static uint64_t PMEM_SIM_LATENCY = 1000;
+
+/*CPU Freqency in GHz, change this value to your CPU*/
+static float PMEM_CPU_FREQ = 2.2; 
+static uint64_t PMEM_SIM_CPU_CYCLES = PMEM_SIM_LATENCY * PMEM_CPU_FREQ;
+#endif
+
 #if defined (UNIV_PMEMOBJ_BUF)
 //GLOBAL variables
 static uint64_t PMEM_N_BUCKETS;
@@ -37,6 +49,7 @@ static uint64_t PMEM_N_FLUSH_THREADS;
 static uint64_t PMEM_FLUSHER_WAKE_THRESHOLD=30;
 
 static FILE* debug_file = fopen("part_debug.txt","a");
+
 
 #if defined (UNIV_PMEMOBJ_BUF_PARTITION)
 //256 buckets => 8 bits, max 32 spaces => 5 bits => need 3 = 8 - 5 bits
@@ -111,6 +124,13 @@ pm_wrapper_buf_alloc_or_open(
 	PMEM_N_BUCKETS = srv_pmem_buf_n_buckets;
 	PMEM_BUCKET_SIZE = srv_pmem_buf_bucket_size;
 	PMEM_BUF_FLUSH_PCT = srv_pmem_buf_flush_pct;
+
+#if defined (UNIV_PMEM_SIM_LATENCY)
+	PMEM_SIM_LATENCY = srv_pmem_sim_latency;
+	PMEM_SIM_CPU_CYCLES = PMEM_SIM_LATENCY * 1.0 * PMEM_CPU_FREQ;
+	pmw->PMEM_SIM_CPU_CYCLES = PMEM_SIM_CPU_CYCLES;
+#endif
+
 #if defined (UNIV_PMEMOBJ_BUF_FLUSHER)
 	PMEM_N_FLUSH_THREADS= srv_pmem_n_flush_threads;
 	PMEM_FLUSHER_WAKE_THRESHOLD = srv_pmem_flush_threshold;
@@ -1103,6 +1123,14 @@ pm_buf_write_with_flusher(
 		   	bool			sync) 
 {
 
+#if defined (UNIV_PMEM_SIM_LATENCY)
+	uint64_t start_cycle;
+	uint64_t end_cycle;
+	uint64_t ncycles;
+	uint64_t start, end, t;
+
+#endif //UNIV_PMEM_SIM_LATENCY
+
 	//bool is_lock_free_block = false;
 	//bool is_lock_free_list = false;
 	bool is_safe_check = false;
@@ -1160,7 +1188,20 @@ pm_buf_write_with_flusher(
 						strstr(pspec_block->file_name, node->name) != 0) {
 					//overwrite this spec block
 					pspec_block->sync = sync;
+#if defined (UNIV_PMEM_SIM_LATENCY)
+					PMEM_DELAY(start_cycle, end_cycle, 2 * PMEM_SIM_CPU_CYCLES);
+#endif //UNIV_PMEM_SIM_LATENCY
+
+#if defined (UNIV_PMEMOBJ_NO_PERSIST)
+					//memcpy(pdata + pspec_block->pmemaddr, src_data, page_size); 
 					pmemobj_memcpy_persist(pop, pdata + pspec_block->pmemaddr, src_data, page_size); 
+#else
+TX_BEGIN(pop) {
+					//pmemobj_memcpy_persist(pop, pdata + pspec_block->pmemaddr, src_data, page_size); 
+					TX_MEMCPY(pdata + pspec_block->pmemaddr, src_data, page_size); 
+}TX_ONABORT {
+}TX_END
+#endif
 					//update the file_name, page_id in case of tmp space
 					strcpy(pspec_block->file_name, node->name);
 					pspec_block->id.copy_from(page_id);
@@ -1182,9 +1223,13 @@ pm_buf_write_with_flusher(
 			pspec_block = D_RW(D_RW(pspec_list->arr)[i]);
 			//add new block to the spec list
 			pspec_block->sync = sync;
+			pmemobj_persist(pop, &pspec_block->sync, sizeof(pspec_block->sync));
 
 			pspec_block->id.copy_from(page_id);
+			pmemobj_persist(pop, &pspec_block->id, sizeof(pspec_block->id));
+
 			pspec_block->state = PMEM_IN_USED_BLOCK;
+			pmemobj_persist(pop, &pspec_block->state, sizeof(pspec_block->state));
 			//get file handle
 			//[Note] is it safe without acquire fil_system->mutex?
 			node = pm_get_node_from_space(page_id.space());
@@ -1196,8 +1241,22 @@ pm_buf_write_with_flusher(
 			//printf ("PMEM_INFO add file %s fd %d\n", node->name, node->handle.m_file);
 			//pspec_block->file_handle = node->handle;
 			strcpy(pspec_block->file_name, node->name);
+			pmemobj_persist(pop, &pspec_block->file_name, sizeof(pspec_block->file_name));
 
+#if defined (UNIV_PMEM_SIM_LATENCY)
+			PMEM_DELAY(start_cycle, end_cycle, 5 * PMEM_SIM_CPU_CYCLES);
+#endif //UNIV_PMEM_SIM_LATENCY
+
+#if defined (UNIV_PMEMOBJ_NO_PERSIST)
+			//memcpy(pdata + pspec_block->pmemaddr, src_data, page_size); 
 			pmemobj_memcpy_persist(pop, pdata + pspec_block->pmemaddr, src_data, page_size); 
+#else
+TX_BEGIN(pop) {
+			//pmemobj_memcpy_persist(pop, pdata + pspec_block->pmemaddr, src_data, page_size); 
+			TX_MEMCPY(pdata + pspec_block->pmemaddr, src_data, page_size); 
+}TX_ONABORT {
+}TX_END
+#endif
 			++(pspec_list->cur_pages);
 
 			printf("Add new block to the spec list, space_no %zu,file %s cur_pages %zu \n", page_id.space(),node->name,  pspec_list->cur_pages);
@@ -1289,7 +1348,22 @@ retry:
 					}
 				}
 				pfree_block->sync = sync;
+				pmemobj_persist(pop, &pfree_block->sync, sizeof(pfree_block->sync));
+#if defined (UNIV_PMEM_SIM_LATENCY)
+				PMEM_DELAY(start_cycle, end_cycle, 2 * PMEM_SIM_CPU_CYCLES);
+#endif //UNIV_PMEM_SIM_LATENCY
+
+#if defined (UNIV_PMEMOBJ_NO_PERSIST)
+				//memcpy(pdata + pfree_block->pmemaddr, src_data, page_size); 
 				pmemobj_memcpy_persist(pop, pdata + pfree_block->pmemaddr, src_data, page_size); 
+#else
+TX_BEGIN(pop) {
+				//pmemobj_memcpy_persist(pop, pdata + pfree_block->pmemaddr, src_data, page_size); 
+				TX_MEMCPY(pdata + pfree_block->pmemaddr, src_data, page_size); 
+}TX_ONABORT {
+}TX_END
+#endif
+
 #if defined (UNIV_PMEMOBJ_BUF_STAT)
 				++buf->bucket_stats[hashed].n_overwrites;
 #endif
@@ -1336,18 +1410,36 @@ retry:
 		assert(0);
 	}
 	strcpy(pfree_block->file_name, node->name);
+	pmemobj_persist(pop, &pfree_block->file_name, sizeof(pfree_block->file_name));
 	//end code
 	
 	//D_RW(free_block)->bpage = bpage;
 	pfree_block->sync = sync;
+	pmemobj_persist(pop, &pfree_block->sync, sizeof(pfree_block->sync));
 
 	pfree_block->id.copy_from(page_id);
+	pmemobj_persist(pop, &pfree_block->id, sizeof(pfree_block->id));
 	
 	assert(pfree_block->size.equals_to(size));
 	assert(pfree_block->state == PMEM_FREE_BLOCK);
 	pfree_block->state = PMEM_IN_USED_BLOCK;
+	pmemobj_persist(pop, &pfree_block->state, sizeof(pfree_block->state));
 
+#if defined (UNIV_PMEM_SIM_LATENCY)
+	/*5 times access to pfree_block (file_name, sync, id, state, and copy page*/
+	PMEM_DELAY(start_cycle, end_cycle, 5 * PMEM_SIM_CPU_CYCLES);
+#endif //UNIV_PMEM_SIM_LATENCY
+
+#if defined (UNIV_PMEMOBJ_NO_PERSIST)
+	//memcpy(pdata + pfree_block->pmemaddr, src_data, page_size); 
 	pmemobj_memcpy_persist(pop, pdata + pfree_block->pmemaddr, src_data, page_size); 
+#else
+TX_BEGIN(pop) {
+	//pmemobj_memcpy_persist(pop, pdata + pfree_block->pmemaddr, src_data, page_size); 
+	TX_MEMCPY(pdata + pfree_block->pmemaddr, src_data, page_size); 
+}TX_ONABORT {
+}TX_END
+#endif
 
 	//if(is_lock_free_block)
 	//pmemobj_rwlock_unlock(pop, &pfree_block->lock);
@@ -1823,6 +1915,13 @@ pm_handle_finished_block(
 	   	PMEM_BUF_BLOCK*		pblock)
 {
 
+#if defined (UNIV_PMEM_SIM_LATENCY)
+	uint64_t start_cycle;
+	uint64_t end_cycle;
+	uint64_t ncycles;
+	uint64_t start, end, t;
+
+#endif //UNIV_PMEM_SIM_LATENCY
 	//bool is_lock_prev_list = false;
 
 	//(1) handle the flush_list
@@ -1836,10 +1935,17 @@ pm_handle_finished_block(
 	//possible owners: producer (pm_buf_write), consummer (this function) threads
 	pmemobj_rwlock_wrlock(pop, &pflush_list->lock);
 	
-	if(pblock->sync)
+	if(pblock->sync){
 		pflush_list->n_sio_pending--;
-	else
+		pmemobj_persist(pop, &pflush_list->n_sio_pending, sizeof(pflush_list->n_sio_pending));
+	}
+	else {
 		pflush_list->n_aio_pending--;
+		pmemobj_persist(pop, &pflush_list->n_aio_pending, sizeof(pflush_list->n_aio_pending));
+	}
+#if defined (UNIV_PMEM_SIM_LATENCY)
+	PMEM_DELAY(start_cycle, end_cycle, PMEM_SIM_CPU_CYCLES);
+#endif //UNIV_PMEM_SIM_LATENCY
 
 	//printf("PMEM_DEBUG aio FINISHED slot_id = %zu n_page_requested = %zu flush_list id = %zu n_pending = %zu/%zu page_id %zu space_id %zu \n",
 	//if (pflush_list->n_aio_pending == 0) {
@@ -1852,12 +1958,26 @@ pm_handle_finished_block(
 		ulint i;
 		for (i = 0; i < pflush_list->max_pages; i++) {
 			D_RW(D_RW(pflush_list->arr)[i])->state = PMEM_FREE_BLOCK;
+			pmemobj_persist(pop, &(D_RW(D_RW(pflush_list->arr)[i])->state), sizeof(D_RW(D_RW(pflush_list->arr)[i])->state));
+
 			D_RW(D_RW(pflush_list->arr)[i])->sync = false;
+			pmemobj_persist(pop, &(D_RW(D_RW(pflush_list->arr)[i])->sync), sizeof(D_RW(D_RW(pflush_list->arr)[i])->sync));
+#if defined (UNIV_PMEM_SIM_LATENCY)
+			PMEM_DELAY(start_cycle, end_cycle, 2 * PMEM_SIM_CPU_CYCLES);
+#endif //UNIV_PMEM_SIM_LATENCY
 		}
 
 		pflush_list->cur_pages = 0;
+		pmemobj_persist(pop, &pflush_list->cur_pages, sizeof(pflush_list->cur_pages));
+
 		pflush_list->is_flush = false;
+		pmemobj_persist(pop, &pflush_list->is_flush, sizeof(pflush_list->is_flush));
+
 		pflush_list->hashed_id = PMEM_ID_NONE;
+		pmemobj_persist(pop, &pflush_list->hashed_id, sizeof(pflush_list->hashed_id));
+#if defined (UNIV_PMEM_SIM_LATENCY)
+		PMEM_DELAY(start_cycle, end_cycle, 3 * PMEM_SIM_CPU_CYCLES);
+#endif //UNIV_PMEM_SIM_LATENCY
 		
 		// (2) Remove this list from the doubled-linked list
 		

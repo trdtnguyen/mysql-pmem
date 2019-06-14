@@ -289,6 +289,11 @@ extern ulong	srv_pmem_buf_size;
 extern ulong	srv_pmem_buf_n_buckets;
 extern double	srv_pmem_buf_flush_pct;
 #endif 
+
+#if defined (UNIV_PMEM_SIM_LATENCY)
+extern ulong	srv_pmem_sim_latency;
+#endif
+
 extern char*	srv_log_group_home_dir;
 
 #ifndef UNIV_HOTBACKUP

@@ -217,6 +217,10 @@ ulong	srv_pmem_page_per_bucket_bits	= 10;
 
 #endif
 
+#if defined (UNIV_PMEM_SIM_LATENCY)
+ulong	srv_pmem_sim_latency	= 1000;
+#endif
+
 #if defined(UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_LOG) || defined (UNIV_PMEMOBJ_WAL)
 char*	srv_pmem_home_dir	= NULL;
 ulong	srv_pmem_pool_size	= 8 * 1024;

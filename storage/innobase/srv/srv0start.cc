@@ -1750,10 +1750,15 @@ innobase_start_or_create_for_mysql(void)
 	ib::info() << "Hello NVM Log from VLDB lab ========\n";
 	gb_pfc = pfc_new(srv_log_file_size);
 #endif
+#if defined (UNIV_SIM_LATENCY)
+	ib::info() << "======= Simulate latency is enable, " << srv_pmem_sim_latency << " ns is addeded  ========\n";
+#endif
+
 #if defined (UNIV_PMEMOBJ_LOG) || defined(UNIV_PMEMOBJ_DBW) || defined (UNIV_PMEMOBJ_BUF) || defined (UNIV_PMEMOBJ_WAL)
 	#ifdef UNIV_PMEMOBJ_LOG
 		ib::info() << "======= Hello PMEMOBJ Log from VLDB lab ========\n";
 	#endif
+
 	#ifdef UNIV_PMEMOBJ_DBW
 		ib::info() << "======= Hello PMEMOBJ Double Write Buffer from VLDB lab ========\n";
 	#endif

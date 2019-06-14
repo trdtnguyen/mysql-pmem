@@ -822,6 +822,9 @@ buf_dblwr_update(
 	const buf_page_t*	bpage,	/*!< in: buffer block descriptor */
 	buf_flush_t		flush_type)/*!< in: flush type */
 {
+#if defined (UNIV_PMEM_SIM_LATENCY)
+	uint64_t start_cycle, end_cycle;
+#endif
 	if (!srv_use_doublewrite_buf
 	    || buf_dblwr == NULL
 	    || fsp_is_system_temporary(bpage->id.space())) {
@@ -841,6 +844,9 @@ buf_dblwr_update(
 
 		buf_dblwr->b_reserved--;
 #if defined (UNIV_PMEMOBJ_DBW)
+#if defined (UNIV_PMEM_SIM_LATENCY)
+		PMEM_DELAY(start_cycle, end_cycle, gb_pmw->PMEM_SIM_CPU_CYCLES);
+#endif //UNIV_PMEM_SIM_LATENCY
 		gb_pmw->pdbw->b_first_free--;
 #endif
 		if (buf_dblwr->b_reserved == 0) {
@@ -873,6 +879,9 @@ buf_dblwr_update(
 					buf_dblwr->in_use[i] = false;
 #if defined (UNIV_PMEMOBJ_DBW)
 					gb_pmw->pdbw->s_first_free--;
+#if defined (UNIV_PMEM_SIM_LATENCY)
+					PMEM_DELAY(start_cycle, end_cycle, gb_pmw->PMEM_SIM_CPU_CYCLES);
+#endif //UNIV_PMEM_SIM_LATENCY
 #endif /* UNIV_PMEMOBJ_DBW */
 					break;
 				}
@@ -1203,6 +1212,10 @@ buf_dblwr_add_to_batch(
 /*====================*/
 	buf_page_t*	bpage)	/*!< in: buffer block to write */
 {
+#if defined (UNIV_PMEM_SIM_LATENCY)
+	uint64_t start_cycle, end_cycle;
+#endif
+
 	ut_a(buf_page_in_file(bpage));
 
 try_again:
@@ -1236,6 +1249,12 @@ try_again:
 	byte*	p = buf_dblwr->write_buf
 		+ univ_page_size.physical() * buf_dblwr->first_free;
 #if defined (UNIV_PMEMOBJ_DBW)
+
+#if defined (UNIV_PMEM_SIM_LATENCY)
+	PMEM_DELAY(start_cycle, end_cycle, gb_pmw->PMEM_SIM_CPU_CYCLES);
+#endif //UNIV_PMEM_SIM_LATENCY
+
+
 	//Replace memcpy with pmemobj_memcpy_persist
 	if (bpage->size.is_compressed()) {
 		UNIV_MEM_ASSERT_RW(bpage->zip.data, bpage->size.physical());
@@ -1278,6 +1297,9 @@ try_again:
 	buf_dblwr->b_reserved++;
 #if defined (UNIV_PMEMOBJ_DBW)
 	gb_pmw->pdbw->b_first_free++;
+#if defined (UNIV_PMEM_SIM_LATENCY)
+	PMEM_DELAY(start_cycle, end_cycle, gb_pmw->PMEM_SIM_CPU_CYCLES);
+#endif //UNIV_PMEM_SIM_LATENCY
 #endif /* UNIV_PMEMOBJ_DBW */
 	ut_ad(!buf_dblwr->batch_running);
 	ut_ad(buf_dblwr->first_free == buf_dblwr->b_reserved);
@@ -1308,6 +1330,9 @@ buf_dblwr_write_single_page(
 	buf_page_t*	bpage,	/*!< in: buffer block to write */
 	bool		sync)	/*!< in: true if sync IO requested */
 {
+#if defined (UNIV_PMEM_SIM_LATENCY)
+	uint64_t start_cycle, end_cycle;
+#endif
 	ulint		n_slots;
 	ulint		size;
 	ulint		offset;
@@ -1364,6 +1389,9 @@ retry:
 	buf_dblwr->buf_block_arr[i] = bpage;
 
 #if defined (UNIV_PMEMOBJ_DBW)
+#if defined (UNIV_PMEM_SIM_LATENCY)
+	PMEM_DELAY(start_cycle, end_cycle, gb_pmw->PMEM_SIM_CPU_CYCLES);
+#endif //UNIV_PMEM_SIM_LATENCY
 	gb_pmw->pdbw->s_first_free++;
 #endif /* UNIV_PMEMOBJ_DBW */
 
@@ -1395,6 +1423,9 @@ retry:
 #if defined (UNIV_PMEMOBJ_DBW)
 	//If the double write buffer is in PMEM, we treat the compressed page and non-compressed page similar
 
+#if defined (UNIV_PMEM_SIM_LATENCY)
+	PMEM_DELAY(start_cycle, end_cycle, gb_pmw->PMEM_SIM_CPU_CYCLES);
+#endif //UNIV_PMEM_SIM_LATENCY
 	if (bpage->size.is_compressed()) {
 		pmemobj_memcpy_persist(gb_pmw->pop,
 			   buf_dblwr->write_buf + univ_page_size.physical() * i,
